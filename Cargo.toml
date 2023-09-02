@@ -1,0 +1,35 @@
+[package]
+name = "penning-helper"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+penning-helper-macros = { path = "penning-helper-macros" }
+penning-helper-sepa = { path = "penning-helper-sepa" }
+penning-helper-conscribo = { path = "penning-helper-conscribo" }
+chrono = "0.4.26"
+genpdf = { version = "0.2.0", features = ["images"] }
+image = "0.23"
+penning-helper-types = { path = "penning-helper-types" }
+penning-helper-mail = { path = "penning-helper-mail" }
+penning-helper-config = { path = "penning-helper-config" }
+toml = "0.7.6"
+penning-helper-turflists = { path = "penning-helper-turflists" }
+
+
+[workspace]
+resolver = "2"
+
+members = [
+    "penning-helper-macros",
+    "penning-helper-sepa",
+    "penning-helper-conscribo",
+    "penning-helper-types",
+    "penning-helper-mail",
+    "penning-helper-config",
+    "penning-helper-turflists",
+    "penning-helper-interface",
+]

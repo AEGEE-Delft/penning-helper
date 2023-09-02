@@ -1,0 +1,52 @@
+<!DOCTYPE html PUBLIC “-//W3C//DTD XHTML 1.0 Transitional//EN”
+    “https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd”>
+<html xmlns=“https://www.w3.org/1999/xhtml”>
+
+<head>
+    <title>AEGEE-Delft invoice {{date}}</title>
+    <meta http-equiv=“Content-Type” content=“text/html; charset=UTF-8” />
+    <meta http-equiv=“X-UA-Compatible” content=“IE=edge” />
+    <meta name=“viewport” content=“width=device-width, initial-scale=1.0 “ />
+    <style>
+    </style>
+</head>
+
+<body>
+    <div>
+        <p>Dear {{name}},</p>
+        {% if amount|owes_or_not %}
+        <p>You owe AEGEE-Delft {{amount|abs_euro}}.</p>
+        {% if amount|too_large %}
+        <p>This amount is too large to automatically deduct. Please transfer it manually to {{company_iban}} under
+            name of {{company_name}}.</p>
+        {% else %}
+        <p>This amount will be automatically deducted from your bank account in the coming days.</p>
+        {% endif %}
+        {% else %}
+        <p>AEGEE-Delft owes you {{amount|abs_euro}}.</p>
+        <p>This amount will be automatically transferred to your bank account in the coming days.</p>
+        {% endif %}
+        <p>Attached is a pdf file containing the costs that were used to calculate the size of the invoice. You can read
+            more about what this means at the bottom of the invoice.</p>
+        <p>If you think this is a mistake please reply to this message, or send an email to treasurer@aegee-delft.nl</p>
+        <br>
+        <p>Met financiële groet, with financial regards,</p>
+        <p></p>
+        <p>Julius de Jeu - Treasurer</p>
+        <p>XLIth Board of AEGEE-Delft 'Wervelwind'</p>
+        <p></p>
+        <div>
+            <img src="cid:logo"
+                alt="AEGEE-Delft logo" width="200">
+        </div>
+        <div style="font-size: x-small;">
+            <p style="color: #711970;">AEGEE-Delft</p>
+            <p>Kanaalweg 4 | 2628 EB Delft | The Netherlands</p>
+            <p>tel: +31 6 135 239 99</p>
+            <p style="color: #711970"><a href="https://aegee-delft.nl">AEGEE-Delft.nl</a> | <a
+                    href="https://www.facebook.com/AEGEE.Delft/">Facebook</a> | <a
+                    href="https://www.instagram.com/aegee.delft/">Instagram</a> </p>
+
+        </div>
+    </div>
+</body>
