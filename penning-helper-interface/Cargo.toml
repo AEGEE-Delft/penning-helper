@@ -12,3 +12,4 @@ penning-helper-types = { path = "../penning-helper-types" }
 rfd = "0.11.4"
 penning-helper-conscribo = { path = "../penning-helper-conscribo" }
 egui_extras = "0.22.0"
+egui_dock = "0.6.3"

@@ -4,6 +4,7 @@ use eframe::{
     epaint::vec2,
 };
 use egui::Visuals;
+use egui_dock::{NodeIndex, Style, Tree};
 use egui_extras::{Column, TableBuilder};
 use penning_helper_turflists::turflist::TurfList;
 
@@ -22,6 +23,7 @@ struct MyEguiApp {
     visuals: Visuals,
     loaded_turflist: Option<TurfList>,
     settings_shown: bool,
+    tabs: MyTabs,
 }
 
 impl MyEguiApp {
@@ -59,106 +61,152 @@ impl eframe::App for MyEguiApp {
             })
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Penning Helper");
-
-            if ui
-                .button("Load Turflist")
-                .on_hover_text("Load a turflist from a CSV file")
-                .clicked()
-            {
-                let path = rfd::FileDialog::new()
-                    .add_filter("CSV", &["csv"])
-                    .pick_file();
-                if let Some(path) = path {
-                    let list = std::fs::File::open(path).unwrap();
-                    self.loaded_turflist = penning_helper_turflists::csv::read_csv(list)
-                        .map(|mut l| {
-                            l.shrink();
-                            l
-                        })
-                        .map_err(|e| e.to_string())
-                        .ok();
-                }
-            }
-
-            if ui
-                .button("Load Members portal list")
-                .on_hover_text("Load an Excel turf list")
-                .clicked()
-            {
-                let path = rfd::FileDialog::new()
-                    .add_filter("Excel File", &["xlsx", "xls", "xlsm", "xlsb"])
-                    .pick_file();
-                if let Some(path) = path {
-                    self.loaded_turflist =
-                        penning_helper_turflists::xlsx::read_excel(path, (1, 0).into())
-                            .map(|mut l| {
-                                l.shrink();
-                                l
-                            })
-                            .map_err(|e| e.to_string())
-                            .ok();
-                }
-            }
-            TableBuilder::new(ui)
-                .striped(true)
-                .columns(Column::remainder(), 4)
-                .header(20.0, |mut r| {
-                    r.col(|ui| {
-                        ui.strong("Name");
-                    });
-                    r.col(|ui| {
-                        ui.strong("Email");
-                    });
-                    r.col(|ui| {
-                        ui.strong("Amount");
-                    });
-                    r.col(|ui| {
-                        ui.strong("IBAN");
-                    });
-                })
-                .body(|mut body| {
-                    if let Some(t) = &self.loaded_turflist {
-                        for row in t.iter() {
-                            body.row(20.0, |mut r| {
-                                r.col(|ui| {
-                                    ui.label(&row.name);
-                                });
-                                r.col(|ui| {
-                                    ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
-                                });
-                                r.col(|ui| {
-                                    ui.label(&row.amount.to_string());
-                                });
-                                r.col(|ui| {
-                                    ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
-                                });
-                            });
-                        }
-                    }
-                });
-
-            // egui::ScrollArea::new([true, true]).show(ui, |ui| {
-            //     egui::Grid::new("grid")
-            //         .striped(true)
-            //         .num_columns(4)
-            //         .show(ui, |ui| {
-            //             ui.label("Name");
-            //             ui.label("Email");
-            //             ui.label("Amount");
-            //             ui.label("IBAN");
-            //             ui.end_row();
-            //             if let Some(t) = &self.loaded_turflist {
-            //                 for row in t.iter() {
-            //                     ui.label(&row.name);
-            //                     ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
-            //                     ui.label(&row.amount.to_string());
-            //                     ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
-            //                     ui.end_row();
-            //                 }
-            //             }
-            //         });
-            // });
+            self.tabs.ui(ui);
         });
+        // egui::CentralPanel::default().show(ctx, |ui| {
+        //     ui.heading("Penning Helper");
+
+        //     if ui
+        //         .button("Load Turflist")
+        //         .on_hover_text("Load a turflist from a CSV file")
+        //         .clicked()
+        //     {
+        //         let path = rfd::FileDialog::new()
+        //             .add_filter("CSV", &["csv"])
+        //             .pick_file();
+        //         if let Some(path) = path {
+        //             let list = std::fs::File::open(path).unwrap();
+        //             self.loaded_turflist = penning_helper_turflists::csv::read_csv(list)
+        //                 .map(|mut l| {
+        //                     l.shrink();
+        //                     l
+        //                 })
+        //                 .map_err(|e| e.to_string())
+        //                 .ok();
+        //         }
+        //     }
+
+        //     if ui
+        //         .button("Load Members portal list")
+        //         .on_hover_text("Load an Excel turf list")
+        //         .clicked()
+        //     {
+        //         let path = rfd::FileDialog::new()
+        //             .add_filter("Excel File", &["xlsx", "xls", "xlsm", "xlsb"])
+        //             .pick_file();
+        //         if let Some(path) = path {
+        //             self.loaded_turflist =
+        //                 penning_helper_turflists::xlsx::read_excel(path, (1, 0).into())
+        //                     .map(|mut l| {
+        //                         l.shrink();
+        //                         l
+        //                     })
+        //                     .map_err(|e| e.to_string())
+        //                     .ok();
+        //         }
+        //     }
+        //     TableBuilder::new(ui)
+        //         .striped(true)
+        //         .columns(Column::remainder(), 4)
+        //         .header(20.0, |mut r| {
+        //             r.col(|ui| {
+        //                 ui.strong("Name");
+        //             });
+        //             r.col(|ui| {
+        //                 ui.strong("Email");
+        //             });
+        //             r.col(|ui| {
+        //                 ui.strong("Amount");
+        //             });
+        //             r.col(|ui| {
+        //                 ui.strong("IBAN");
+        //             });
+        //         })
+        //         .body(|mut body| {
+        //             if let Some(t) = &self.loaded_turflist {
+        //                 for row in t.iter() {
+        //                     body.row(20.0, |mut r| {
+        //                         r.col(|ui| {
+        //                             ui.label(&row.name);
+        //                         });
+        //                         r.col(|ui| {
+        //                             ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
+        //                         });
+        //                         r.col(|ui| {
+        //                             ui.label(&row.amount.to_string());
+        //                         });
+        //                         r.col(|ui| {
+        //                             ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
+        //                         });
+        //                     });
+        //                 }
+        //             }
+        //         });
+
+        //     // egui::ScrollArea::new([true, true]).show(ui, |ui| {
+        //     //     egui::Grid::new("grid")
+        //     //         .striped(true)
+        //     //         .num_columns(4)
+        //     //         .show(ui, |ui| {
+        //     //             ui.label("Name");
+        //     //             ui.label("Email");
+        //     //             ui.label("Amount");
+        //     //             ui.label("IBAN");
+        //     //             ui.end_row();
+        //     //             if let Some(t) = &self.loaded_turflist {
+        //     //                 for row in t.iter() {
+        //     //                     ui.label(&row.name);
+        //     //                     ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
+        //     //                     ui.label(&row.amount.to_string());
+        //     //                     ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
+        //     //                     ui.end_row();
+        //     //                 }
+        //     //             }
+        //     //         });
+        //     // });
+        // });
+    }
+}
+
+struct MyTabs {
+    tree: Tree<String>,
+}
+
+impl Default for MyTabs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MyTabs {
+    pub fn new() -> Self {
+        let tab1 = "tab1".to_string();
+        let tab2 = "tab2".to_string();
+
+        let mut tree = Tree::new(vec![tab1]);
+        tree.split_left(NodeIndex::root(), 0.20, vec![tab2]);
+
+        Self { tree }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        egui_dock::DockArea::new(&mut self.tree)
+            .style(Style::from_egui(ui.style().as_ref()))
+            .show_close_buttons(false)
+            .show_inside(ui, &mut TabViewer {});
+    }
+}
+
+struct TabViewer;
+
+impl egui_dock::TabViewer for TabViewer {
+    type Tab = String;
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        ui.label(format!("Content of {tab}"));
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        (&*tab).into()
     }
 }

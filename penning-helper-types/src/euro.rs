@@ -1,7 +1,7 @@
 use std::{
     fmt::{Debug, Display},
     iter::Sum,
-    ops::{Add, AddAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Neg, Sub, SubAssign, Mul},
 };
 
 use serde::{Deserialize, Serialize};
@@ -150,5 +150,14 @@ impl From<f64> for Euro {
         let euros = value as i32;
         let cents = ((value - euros as f64) * 100.0).round() as i32;
         Euro(euros, cents).fix_negative_cents()
+    }
+}
+
+impl Mul<f64> for Euro {
+    type Output = Euro;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        let value = (self.0 as f64 + self.1 as f64 / 100.0) * rhs;
+        Euro::from(value)
     }
 }

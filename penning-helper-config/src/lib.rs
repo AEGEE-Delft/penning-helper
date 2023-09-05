@@ -16,6 +16,10 @@ mod v1 {
 
     /// Conscribo Config
     pub mod conscribo;
+
+    pub fn default_year_format() -> String {
+        "2223".to_string()
+    }
 }
 
 pub const CURRENT_VERSION: Version<1> = Version;
@@ -28,6 +32,8 @@ pub enum Config {
         mail: v1::mail::MailConfig,
         sepa: v1::sepa::SEPAConfig,
         conscribo: v1::conscribo::ConscriboConfig,
+        #[serde(default = "v1::default_year_format")]
+        year_format: String,
     },
 }
 
@@ -50,6 +56,12 @@ impl Config {
         }
     }
 
+    pub fn year_format(&self) -> &str {
+        match self {
+            Self::V1 { year_format, .. } => year_format,
+        }
+    }
+
     pub fn needs_upgrade(&self) -> bool {
         match self {
             Self::V1 { version, .. } => version < &CURRENT_VERSION,
@@ -62,11 +74,13 @@ impl Config {
                 mail,
                 sepa,
                 conscribo,
+                year_format,
                 ..
             } => Self::V1 {
                 mail,
                 sepa,
                 conscribo,
+                year_format,
                 version: CURRENT_VERSION,
             },
         }
@@ -80,6 +94,7 @@ impl Default for Config {
             mail: v1::mail::MailConfig::default(),
             sepa: v1::sepa::SEPAConfig::default(),
             conscribo: v1::conscribo::ConscriboConfig::default(),
+            year_format: v1::default_year_format(),
         }
     }
 }

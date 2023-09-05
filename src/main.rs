@@ -1,5 +1,5 @@
 use genpdf::{
-    elements::{LinearLayout, PaddedElement},
+    elements::{self, LinearLayout, PaddedElement, Paragraph, TableLayout},
     style::StyledString,
     Element, Margins,
 };
@@ -7,12 +7,9 @@ use penning_helper_conscribo::{
     AddChangeTransaction, ConscriboClient, ConscriboMultiRequest, UnifiedTransaction,
 };
 
-use penning_helper_types::{Date, Euro};
+use penning_helper_types::{Address, Date, Euro};
 
 fn main() {
-    let d = penning_helper_config::Config::default();
-    println!("{:#?}", d);
-    println!("{}", toml::to_string(&d).unwrap());
     let config: penning_helper_config::Config =
         toml::from_str(std::fs::read_to_string(".sample.toml").unwrap().as_str()).unwrap();
     // let mail_server = penning_helper_mail::MailServer::new(config.mail(), config.sepa()).unwrap();
@@ -26,6 +23,25 @@ fn main() {
     //         Date::today(),
     //     )
     //     .unwrap();
+    let factuur = factuur_generator(
+        &config,
+        Address::new(
+            "AEGEE-Utrecht",
+            "Princetonplein 9",
+            "3584CC",
+            "Utrecht",
+            Some("Netherlands"),
+        ),
+        Date::today(),
+        1,
+        &vec![
+            FactuurItem::new("TestItem123".to_string(), 10.50.into(), 10.),
+            FactuurItem::new("Waluigi".to_string(), 20.0.into(), 2.),
+        ],
+    );
+    std::fs::write("factuur.pdf", factuur).unwrap();
+    return;
+
     let client = ConscriboClient::new_from_cfg(config.conscribo()).unwrap();
     let members = client.get_relations("persoon").unwrap();
     let others = client.get_relations("onbekend").unwrap();
@@ -279,6 +295,193 @@ fn create_pdf(transactions: Vec<UnifiedTransaction>, name: &str) -> Vec<u8> {
     The 'Credit' side is money you sent AEGEE-Delft, either directly through an invoice like this one, or by declaring costs you made for committees.";
     doc.push(genpdf::elements::Paragraph::new(EXPLAINER).wrap_small_pad());
 
+    let mut buf = vec![];
+    doc.render(&mut buf).unwrap();
+    buf
+}
+
+struct FactuurItem {
+    name: String,
+    cost: Euro,
+    amount: f64,
+}
+
+impl FactuurItem {
+    pub fn new(name: String, cost: Euro, amount: f64) -> Self {
+        Self { name, cost, amount }
+    }
+}
+
+macro_rules! paragraphs {
+    ($($e:expr),+ $(,)?) => {
+        elements::LinearLayout::vertical()
+        $(
+            .element(elements::Paragraph::new($e))
+        )+
+    };
+}
+
+fn factuur_generator(
+    cfg: &penning_helper_config::Config,
+    address: Address,
+    date: Date,
+    factuur_number: u32,
+    items: &[FactuurItem],
+) -> Vec<u8> {
+    let mut header = TableLayout::new(vec![2, 1]);
+    let image = image::open("logo.png").unwrap();
+    let image = image.to_rgb8();
+    let w = image.width();
+    let max_w = 500;
+    let scale_w = max_w as f64 / w as f64;
+    let image = image::DynamicImage::ImageRgb8(image);
+
+    let aegee_address = elements::LinearLayout::vertical()
+        .element(elements::Paragraph::new("AEGEE-Delft"))
+        .element(elements::Paragraph::new("Kanaalweg 4"))
+        .element(elements::Paragraph::new("2628 EB Delft"))
+        .element(elements::Paragraph::new("The Netherlands"))
+        .styled(genpdf::style::Style::new().with_font_size(8).bold())
+        .padded((0, 0, 5, 0));
+
+    let other_info = paragraphs!(
+        "Tel: +31 6 13523999",
+        "",
+        "Email: treasurer@aegee-delft.nl",
+        "Email: board@aegee-delft.nl",
+        "Web: https://aegee-delft.nl",
+        "",
+        "Rabobank:",
+        format!("BIC: {}", cfg.sepa().company_bic),
+        format!("IBAN: {}", cfg.sepa().company_iban),
+        "",
+        "KvK: Delft, nr. 40398155"
+    )
+    .styled(genpdf::style::Style::new().with_font_size(8));
+
+    let mut recipient_info = LinearLayout::vertical();
+    {
+        for line in address.iter_with_empty() {
+            recipient_info = recipient_info.element(Paragraph::new(line));
+        }
+    }
+
+    let image = genpdf::elements::Image::from_dynamic_image(image)
+        .expect("Failed to load test image")
+        .with_alignment(genpdf::Alignment::Left)
+        .with_scale((scale_w, scale_w));
+    header
+        .row()
+        .element(
+            LinearLayout::vertical()
+                .element(image)
+                .element(recipient_info),
+        )
+        .element(
+            LinearLayout::vertical()
+                .element(aegee_address)
+                .element(other_info)
+                .padded((0, 0, 5, 0)),
+        )
+        .push()
+        .unwrap();
+    // header
+    //     .row()
+    //     .element(elements::Paragraph::new(format!("Naam: {}", name)).wrap_small_pad())
+    //     .element(elements::Paragraph::new(format!("Datum: {}", date)).wrap_small_pad())
+    //     .push()
+    //     .unwrap();
+    // header
+    //     .row()
+    //     .element(elements::Paragraph::new(format!("Adres: {}", address)).wrap_small_pad())
+    //     .element(elements::Paragraph::new(format!("Factuurnummer: {}", 1)).wrap_small_pad())
+    //     .push()
+    //     .unwrap();
+    let mut doc =
+        genpdf::Document::new(genpdf::fonts::from_files("./fonts", "Roboto", None).unwrap());
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(20);
+    doc.set_page_decorator(decorator);
+    doc.set_title("Factuur");
+    doc.push(header);
+
+    let mut table = TableLayout::new(vec![5, 3]);
+    table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    table
+        .row()
+        .element(
+            elements::Paragraph::new("Factuur")
+                .styled(genpdf::style::Style::new().with_font_size(28))
+                .wrap_small_pad(),
+        )
+        .element(
+            LinearLayout::vertical()
+                .element(elements::Paragraph::new("Date of invoice:"))
+                .element(elements::Paragraph::new(format!("{}", date)))
+                .wrap_small_pad(),
+        )
+        .push()
+        .unwrap();
+    table
+        .row()
+        .element(
+            LinearLayout::vertical()
+                .element(elements::Paragraph::new("Your Reference:"))
+                .element(elements::Paragraph::new(""))
+                .wrap_small_pad(),
+        )
+        .element(
+            LinearLayout::vertical()
+                .element(elements::Paragraph::new("Our Reference:"))
+                .element(elements::Paragraph::new(format!(
+                    "F{}-{:0>3}",
+                    cfg.year_format(),
+                    factuur_number
+                )))
+                .wrap_small_pad(),
+        )
+        .push()
+        .unwrap();
+
+    doc.push(table.padded((0, 0, 5, 0)));
+
+    let mut table = TableLayout::new(vec![5, 1, 1, 1]);
+    table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    table
+        .row()
+        .element(elements::Paragraph::new("Omschrijving").wrap_small_pad())
+        .element(elements::Paragraph::new("Aantal").wrap_small_pad())
+        .element(elements::Paragraph::new("Prijs").wrap_small_pad())
+        .element(elements::Paragraph::new("Totaal").wrap_small_pad())
+        .push()
+        .unwrap();
+    for item in items {
+        table
+            .row()
+            .element(elements::Paragraph::new(item.name.clone()).wrap_small_pad())
+            .element(elements::Paragraph::new(format!("{}", item.amount)).wrap_small_pad())
+            .element(elements::Paragraph::new(format!("{}", item.cost)).wrap_small_pad())
+            .element(
+                elements::Paragraph::new(format!("{}", item.cost * item.amount)).wrap_small_pad(),
+            )
+            .push()
+            .unwrap();
+    }
+    table
+        .row()
+        .element(elements::Paragraph::new("Total").wrap_small_pad())
+        .element(elements::Paragraph::new("").wrap_small_pad())
+        .element(elements::Paragraph::new("").wrap_small_pad())
+        .element(
+            elements::Paragraph::new(format!(
+                "{}",
+                items.iter().map(|i| i.cost * i.amount).sum::<Euro>()
+            ))
+            .wrap_small_pad(),
+        )
+        .push()
+        .unwrap();
+    doc.push(table);
     let mut buf = vec![];
     doc.render(&mut buf).unwrap();
     buf
