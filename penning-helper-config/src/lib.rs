@@ -3,9 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-mod version;
-pub use version::Version;
-
+pub use penning_helper_macros::Describe;
 pub use v1::conscribo::ConscriboConfig;
 pub use v1::mail::{Credentials, MailAddress, MailConfig};
 pub use v1::sepa::SEPAConfig;
@@ -25,92 +23,118 @@ mod v1 {
     }
 }
 
-pub const CURRENT_VERSION: Version<1> = Version;
+#[derive(Debug, Clone)]
+pub enum Type {
+    String,
+    Email,
+    Integer,
+    Password,
+    Struct(Vec<(&'static str, Type)>),
+}
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum Config {
-    V1 {
-        version: Version<1>,
-        mail: v1::mail::MailConfig,
-        sepa: v1::sepa::SEPAConfig,
-        conscribo: v1::conscribo::ConscriboConfig,
-        #[serde(default = "v1::default_year_format")]
-        year_format: String,
-    },
+pub enum TypeStuff {
+    Header(&'static str),
+    Field(&'static str, Type),
+}
+
+impl Type {
+    fn is_struct(&self) -> bool {
+        matches!(self, Type::Struct(_))
+    }
+
+    pub fn to_type_stuff(&self) -> Vec<TypeStuff> {
+        let mut v = vec![];
+        match self {
+            Type::Struct(s) => {
+                for (k, t) in s {
+                    if t.is_struct() {
+                        v.push(TypeStuff::Header(k));
+                        v.extend(t.to_type_stuff());
+                    } else {
+                        v.push(TypeStuff::Field(k, t.clone()));
+                    }
+                }
+            }
+            _ => {}
+        }
+        v
+    }
+}
+
+pub trait Describe {
+    fn describe_fields() -> Vec<(&'static str, Type)> {
+        vec![]
+    }
+
+    fn describe_self() -> Type {
+        Type::Struct(Self::describe_fields())
+    }
+}
+
+impl Describe for String {
+    fn describe_self() -> Type {
+        Type::String
+    }
+}
+
+impl Describe for u16 {
+    fn describe_self() -> Type {
+        Type::Integer
+    }
+}
+
+pub const CURRENT_VERSION: usize = 1;
+
+#[derive(Debug, Clone, Deserialize, Serialize, Describe)]
+pub struct Config {
+    #[serde(default = "v1::default_year_format")]
+    year_format: String,
+    mail: v1::mail::MailConfig,
+    sepa: v1::sepa::SEPAConfig,
+    conscribo: v1::conscribo::ConscriboConfig,
+    #[describe(skip)]
+    version: usize,
 }
 
 impl Config {
     pub fn mail(&self) -> &v1::mail::MailConfig {
-        match self {
-            Self::V1 { mail, .. } => mail,
-        }
+        &self.mail
     }
 
     pub fn mail_mut(&mut self) -> &mut v1::mail::MailConfig {
-        match self {
-            Self::V1 { mail, .. } => mail,
-        }
+        &mut self.mail
     }
 
     pub fn sepa(&self) -> &v1::sepa::SEPAConfig {
-        match self {
-            Self::V1 { sepa, .. } => sepa,
-        }
+        &self.sepa
     }
 
     pub fn sepa_mut(&mut self) -> &mut v1::sepa::SEPAConfig {
-        match self {
-            Self::V1 { sepa, .. } => sepa,
-        }
+        &mut self.sepa
     }
 
     pub fn conscribo(&self) -> &v1::conscribo::ConscriboConfig {
-        match self {
-            Self::V1 { conscribo, .. } => conscribo,
-        }
+        &self.conscribo
     }
 
     pub fn conscribo_mut(&mut self) -> &mut v1::conscribo::ConscriboConfig {
-        match self {
-            Self::V1 { conscribo, .. } => conscribo,
-        }
+        &mut self.conscribo
     }
 
     pub fn year_format(&self) -> &str {
-        match self {
-            Self::V1 { year_format, .. } => year_format,
-        }
+        &self.year_format
     }
 
     pub fn year_format_mut(&mut self) -> &mut String {
-        match self {
-            Self::V1 { year_format, .. } => year_format,
-        }
+        &mut self.year_format
     }
 
     pub fn needs_upgrade(&self) -> bool {
-        match self {
-            Self::V1 { version, .. } => version < &CURRENT_VERSION,
-        }
+        self.version < CURRENT_VERSION
     }
 
     pub fn upgrade_to_latest(self) -> Self {
-        match self {
-            Self::V1 {
-                mail,
-                sepa,
-                conscribo,
-                year_format,
-                ..
-            } => Self::V1 {
-                mail,
-                sepa,
-                conscribo,
-                year_format,
-                version: CURRENT_VERSION,
-            },
-        }
+        self
     }
 
     pub fn from_toml(toml: &str) -> Result<Self, toml::de::Error> {
@@ -140,6 +164,54 @@ impl Config {
             .expect("Could not write config file");
         buf.flush().expect("Could not flush config file");
     }
+
+    /// get a list of all things potentially wrong with the config
+    pub fn config_errors(&self) -> Vec<&str> {
+        let mut errors = Vec::new();
+        if self.mail().smtp_server.is_empty() {
+            errors.push("SMTP server is empty");
+        }
+        if self.mail().smtp_port == 0 {
+            errors.push("SMTP port is 0");
+        }
+        if self.mail().credentials.username.is_empty() {
+            errors.push("SMTP username is empty");
+        }
+        if self.mail().credentials.password.is_empty() {
+            errors.push("SMTP password is empty");
+        }
+        if self.mail().from.name.is_empty() || self.mail().from.address.is_empty() {
+            errors.push("SMTP from is empty");
+        }
+        if self.mail().reply_to.name.is_empty() || self.mail().reply_to.address.is_empty() {
+            errors.push("SMTP reply-to is empty");
+        }
+
+        if self.sepa().company_id.is_empty() {
+            errors.push("SEPA company id is empty");
+        }
+        if self.sepa().company_name.is_empty() {
+            errors.push("SEPA company name is empty");
+        }
+        if self.sepa().company_iban.is_empty() {
+            errors.push("SEPA company IBAN is empty");
+        }
+        if self.sepa().company_bic.is_empty() {
+            errors.push("SEPA company BIC is empty");
+        }
+
+        if self.conscribo().username.is_empty() {
+            errors.push("Conscribo username is empty");
+        }
+        if self.conscribo().password.is_empty() {
+            errors.push("Conscribo password is empty");
+        }
+        if self.conscribo().url.is_empty() {
+            errors.push("Conscribo URL is empty");
+        }
+
+        errors
+    }
 }
 
 fn config_location() -> PathBuf {
@@ -154,7 +226,7 @@ fn config_location() -> PathBuf {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::V1 {
+        Self {
             version: CURRENT_VERSION,
             mail: v1::mail::MailConfig::default(),
             sepa: v1::sepa::SEPAConfig::default(),

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use crate::{Describe, Type};
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct MailConfig {
     pub smtp_server: String,
     pub smtp_port: u16,
@@ -9,9 +10,11 @@ pub struct MailConfig {
     pub reply_to: MailAddress,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct Credentials {
+    #[describe(email)]
     pub username: String,
+    #[describe(password)]
     pub password: String,
 }
 
@@ -21,9 +24,10 @@ impl Credentials {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct MailAddress {
     pub name: String,
+    #[describe(email)]
     pub address: String,
 }
 

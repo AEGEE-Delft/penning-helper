@@ -1,8 +1,10 @@
+use crate::{Describe, Type};
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct ConscriboConfig {
     pub username: String,
+    #[describe(password)]
     pub password: String,
     pub url: String,
 }

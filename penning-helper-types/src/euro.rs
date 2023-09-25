@@ -1,7 +1,8 @@
 use std::{
     fmt::{Debug, Display},
     iter::Sum,
-    ops::{Add, AddAssign, Neg, Sub, SubAssign, Mul},
+    ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign},
+    str::FromStr,
 };
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,15 @@ impl Euro {
             self.1 += 100;
         }
         self
+    }
+}
+
+impl FromStr for Euro {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let f = s.parse::<f64>().map_err(|_| "Invalid Euro format")?;
+        Ok(Euro::from(f))
     }
 }
 

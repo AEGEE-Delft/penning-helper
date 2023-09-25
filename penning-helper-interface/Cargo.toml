@@ -16,3 +16,4 @@ egui_dock = "0.6.3"
 penning-helper-config = { path = "../penning-helper-config" }
 egui = { version = "0.22.0" }
 dirs = "5.0.1"
+regex = "1.9.5"

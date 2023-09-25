@@ -1,7 +1,9 @@
 use serde::{Serialize, Deserialize};
 
+use crate::{Describe, Type};
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct SEPAConfig {
     pub company_name: String,
     pub company_iban: String,
