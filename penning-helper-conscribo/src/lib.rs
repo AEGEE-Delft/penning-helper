@@ -70,6 +70,24 @@ impl ConscriboClient {
         value.to_result()
     }
 
+    pub fn do_multi_request<A: ToRequest, R: DeserializeOwned>(
+        &self,
+        reqs: Vec<A>,
+    ) -> ConscriboResult<Vec<R>> {
+        let multi_req = ConscriboMultiRequest::new(reqs);
+        let t = self
+            .client
+            .post(&self.url)
+            .header("X-Conscribo-API-Version", VERSION)
+            .header("X-Conscribo-SessionId", &self.session_id)
+            .json(&multi_req)
+            .send()?
+            .text()?;
+        println!("{}", t);
+        let value: MultiRootResult<R> = serde_json::from_str(&t)?;
+        value.into()
+    }
+
     pub fn get_field_definitions(&self, entity_type: impl ToString) -> ConscriboResult<Vec<Field>> {
         let req = FieldReq::new(entity_type.to_string());
         let res: FieldRes = self.do_request(req)?;
@@ -77,32 +95,31 @@ impl ConscriboClient {
     }
 
     pub fn get_relations(&self, entity_type: impl ToString) -> ConscriboResult<Vec<Relation>> {
-        {
-            if let Ok(f) =
-                std::fs::File::open(format!("relations_{}.json", entity_type.to_string()))
-            {
-                let res: Relations = serde_json::from_reader(f)?;
-                return Ok(res.into());
-            }
-        }
+        // {
+        //     if let Ok(f) =
+        //         std::fs::File::open(format!("relations_{}.json", entity_type.to_string()))
+        //     {
+        //         let res: Relations = serde_json::from_reader(f)?;
+        //         return Ok(res.into());
+        //     }
+        // }
+        let et = entity_type.to_string();
         let req = ListRelations::new(
-            entity_type.to_string(),
+            et.clone(),
             vec![
                 "code".to_string(),
                 "naam".to_string(),
-                "e_mailadres".to_string(),
-                "bankrekeningnummer".to_string(),
-                // "membership_started".to_string(),
+                "email".to_string(),
+                "rekening".to_string(),
+                "membership_started".to_string(),
             ],
         );
         let res: Relations = self.do_request(req)?;
-        {
-            let mut f =
-                std::fs::File::create(format!("relations_{}.json", entity_type.to_string()))
-                    .unwrap();
-            serde_json::to_writer_pretty(&mut f, &res)?;
-        }
-        Ok(res.into())
+
+        let mut res: Vec<Relation> = res.into();
+        res.iter_mut().for_each(|r| r.source = et.clone());
+
+        Ok(res)
     }
 
     pub fn get_transactions(

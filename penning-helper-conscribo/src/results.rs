@@ -31,13 +31,30 @@ impl<T> From<RootResult<T>> for ConscriboResult<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct MultiRootResult<T> {
-    results: Vec<RootResult<T>>,
+#[serde(rename_all = "camelCase")]
+pub struct MultiRootResult<T> {
+    results: MultiResult<T>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiResult<T> {
+    result: Vec<ConscriboResultE<T>>,
 }
 
 impl<T> From<MultiRootResult<T>> for ConscriboResult<Vec<T>> {
     fn from(value: MultiRootResult<T>) -> Self {
-        value.results.into_iter().map(RootResult::into).collect()
+        value
+            .results
+            .result
+            .into_iter()
+            .map(|r| match r {
+                ConscriboResultE::Ok { result, .. } => Ok(result),
+                ConscriboResultE::Err { notifications, .. } => {
+                    Err(ConscriboError::ErrorMessages(notifications.notification))
+                }
+            })
+            .collect()
     }
 }
 
@@ -144,6 +161,8 @@ pub struct Relation {
     pub rekening: Option<Account>,
     #[serde(default, rename = "membership_started")]
     pub membership_started: Option<String>,
+    #[serde(skip)]
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,7 +305,7 @@ pub struct UnifiedTransaction {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TransactionResult {
+pub struct TransactionResult {
     transaction_id: i32,
     transaction_nr: String,
 }

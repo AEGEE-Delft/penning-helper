@@ -18,6 +18,7 @@ penning-helper-mail = { path = "penning-helper-mail" }
 penning-helper-config = { path = "penning-helper-config" }
 toml = "0.7.6"
 penning-helper-turflists = { path = "penning-helper-turflists" }
+serde_json = "1.0.105"
 
 
 [workspace]

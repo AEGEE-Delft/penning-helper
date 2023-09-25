@@ -80,6 +80,9 @@ impl TurfListRow {
                 .as_ref()
                 .ok_or(crate::matcher::MatchError::NoMatch)?,
         };
+        if target == "" {
+            return Err(crate::matcher::MatchError::NoMatch);
+        }
         for (i, name) in options.iter().enumerate() {
             let score = damerau_levenshtein(name, target);
             // println!("{}: {} -> {}", name, target, score);
@@ -87,6 +90,11 @@ impl TurfListRow {
                 best_match = Some(i);
                 best_score = score;
             }
+        }
+        // println!("{}: {} -> {}", target, options[best_match.unwrap()], best_score);
+        if best_score > 0.3 {
+            // println!("No match found for {}", target);
+            return Err(crate::matcher::MatchError::NoMatch)
         }
         best_match.ok_or(crate::matcher::MatchError::NoMatch)
     }

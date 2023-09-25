@@ -7,7 +7,7 @@ use crate::Side;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConscriboRequest<T> {
-    request: T,
+    pub(crate) request: T,
 }
 
 impl<T> ConscriboRequest<T> {
@@ -16,15 +16,20 @@ impl<T> ConscriboRequest<T> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct ConscriboMultiRequest<T> {
-    requests: Vec<ConscriboRequest<T>>,
+    requests: ConscriboRequest<Vec<ReqHolder<T>>>,
 }
 
-impl<T> ConscriboMultiRequest<T> {
+impl<T: ToRequest> ConscriboMultiRequest<T> {
     pub fn new(requests: Vec<T>) -> Self {
         Self {
-            requests: requests.into_iter().map(ConscriboRequest::new).collect(),
+            requests: ConscriboRequest {
+                request: requests
+                    .into_iter()
+                    .map(|r| r.to_request().request)
+                    .collect(),
+            },
         }
     }
 }
@@ -149,6 +154,7 @@ impl TransactionFilter {
 #[serde(rename_all = "camelCase")]
 #[set_command(addChangeTransaction)]
 pub struct AddChangeTransaction {
+    #[serde(skip_serializing_if = "Option::is_none")]
     transaction_id: Option<i32>,
     date: Date,
     description: String,
@@ -158,7 +164,7 @@ pub struct AddChangeTransaction {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TransactionRows {
-    transaction_rows: Vec<TransactionRow>,
+    transaction_row: Vec<TransactionRow>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -178,7 +184,7 @@ impl AddChangeTransaction {
             date,
             description,
             transaction_rows: TransactionRows {
-                transaction_rows: Vec::new(),
+                transaction_row: Vec::new(),
             },
         }
     }
@@ -191,7 +197,7 @@ impl AddChangeTransaction {
         reference: String,
         relation_nr: u32,
     ) -> Self {
-        self.transaction_rows.transaction_rows.push(TransactionRow {
+        self.transaction_rows.transaction_row.push(TransactionRow {
             account_nr,
             amount,
             side,

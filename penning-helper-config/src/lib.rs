@@ -1,3 +1,6 @@
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 mod version;
@@ -18,7 +21,7 @@ mod v1 {
     pub mod conscribo;
 
     pub fn default_year_format() -> String {
-        "2223".to_string()
+        "2324".to_string()
     }
 }
 
@@ -44,7 +47,19 @@ impl Config {
         }
     }
 
+    pub fn mail_mut(&mut self) -> &mut v1::mail::MailConfig {
+        match self {
+            Self::V1 { mail, .. } => mail,
+        }
+    }
+
     pub fn sepa(&self) -> &v1::sepa::SEPAConfig {
+        match self {
+            Self::V1 { sepa, .. } => sepa,
+        }
+    }
+
+    pub fn sepa_mut(&mut self) -> &mut v1::sepa::SEPAConfig {
         match self {
             Self::V1 { sepa, .. } => sepa,
         }
@@ -56,7 +71,19 @@ impl Config {
         }
     }
 
+    pub fn conscribo_mut(&mut self) -> &mut v1::conscribo::ConscriboConfig {
+        match self {
+            Self::V1 { conscribo, .. } => conscribo,
+        }
+    }
+
     pub fn year_format(&self) -> &str {
+        match self {
+            Self::V1 { year_format, .. } => year_format,
+        }
+    }
+
+    pub fn year_format_mut(&mut self) -> &mut String {
         match self {
             Self::V1 { year_format, .. } => year_format,
         }
@@ -84,6 +111,44 @@ impl Config {
                 version: CURRENT_VERSION,
             },
         }
+    }
+
+    pub fn from_toml(toml: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml)
+    }
+
+    pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string(self)
+    }
+
+    pub fn load_from_file() -> Self {
+        let config_file = config_location();
+        if !config_file.exists() {
+            Default::default()
+        } else {
+            let config = std::fs::read_to_string(config_file).expect("Could not read config file");
+            Self::from_toml(&config).expect("Could not parse config file")
+        }
+    }
+
+    pub fn save_to_file(&self) {
+        let config_file = config_location();
+        let config_file = std::fs::File::create(config_file).unwrap();
+        let toml = self.to_toml().expect("Could not serialize config");
+        let mut buf = BufWriter::new(config_file);
+        buf.write_all(toml.as_bytes())
+            .expect("Could not write config file");
+        buf.flush().expect("Could not flush config file");
+    }
+}
+
+fn config_location() -> PathBuf {
+    if let Some(config_dir) = dirs::config_dir() {
+        let dir = config_dir.join("penning-helper");
+        std::fs::create_dir_all(&dir).expect("Could not create config directory");
+        dir.join("config.toml")
+    } else {
+        PathBuf::from("penning-helper.toml")
     }
 }
 

@@ -1,10 +1,12 @@
+use std::{fmt::Display, collections::HashMap};
+
 use genpdf::{
     elements::{self, LinearLayout, PaddedElement, Paragraph, TableLayout},
     style::StyledString,
     Element, Margins,
 };
 use penning_helper_conscribo::{
-    AddChangeTransaction, ConscriboClient, ConscriboMultiRequest, UnifiedTransaction,
+    AddChangeTransaction, ConscriboClient, ConscriboMultiRequest, UnifiedTransaction, MultiRootResult, Transaction, TransactionResult, ConscriboResult,
 };
 
 use penning_helper_types::{Address, Date, Euro};
@@ -12,45 +14,19 @@ use penning_helper_types::{Address, Date, Euro};
 fn main() {
     let config: penning_helper_config::Config =
         toml::from_str(std::fs::read_to_string(".sample.toml").unwrap().as_str()).unwrap();
-    // let mail_server = penning_helper_mail::MailServer::new(config.mail(), config.sepa()).unwrap();
-    // let (r, pdf_file) = stuff(config.conscribo());
-    // mail_server
-    //     .send_mail(
-    //         "Julius de Jeu",
-    //         "julius@asraphiel.dev",
-    //         pdf_file,
-    //         r,
-    //         Date::today(),
-    //     )
-    //     .unwrap();
-    let factuur = factuur_generator(
-        &config,
-        Address::new(
-            "AEGEE-Utrecht",
-            "Princetonplein 9",
-            "3584CC",
-            "Utrecht",
-            Some("Netherlands"),
-        ),
-        Date::today(),
-        1,
-        &vec![
-            FactuurItem::new("TestItem123".to_string(), 10.50.into(), 10.),
-            FactuurItem::new("Waluigi".to_string(), 20.0.into(), 2.),
-        ],
-    );
-    std::fs::write("factuur.pdf", factuur).unwrap();
-    return;
 
     let client = ConscriboClient::new_from_cfg(config.conscribo()).unwrap();
-    let members = client.get_relations("persoon").unwrap();
+    let members = client.get_relations("lid").unwrap();
     let others = client.get_relations("onbekend").unwrap();
+    let others = others.into_iter().filter(|o| !members.iter().any(|m|m.naam == o.naam)).collect::<Vec<_>>();
     let all_relations = members
         .into_iter()
         .chain(others.into_iter())
+        // .filter(|r| r.naam == "Julius de Jeu")
         .collect::<Vec<_>>();
-    // let f = std::fs::File::open("bbq.xlsx").unwrap();
-    let mut turf_list = penning_helper_turflists::xlsx::read_excel("bbq.xlsx", 6.0.into()).unwrap();
+    // let f = std::fs::File::open("borrel.csv").unwrap();
+    // let mut turf_list = penning_helper_turflists::csv::read_csv(f).unwrap();
+    let mut turf_list = penning_helper_turflists::xlsx::read_excel("intro.xlsx", 420.0.into()).unwrap();
     turf_list.shrink();
     let names = all_relations
         .iter()
@@ -60,25 +36,22 @@ fn main() {
         .iter()
         .map(|r| r.email_address.clone())
         .collect::<Vec<_>>();
+    let mut no_matches: HashMap<String, Euro> = HashMap::new();
     for entry in turf_list.iter() {
         // println!("{:#?}", entry);
         if entry.iban.is_some() {
             println!("{} already has an iban", entry.name);
             continue;
         }
-        let idx = match entry.best_email_match(&emails) {
-            Ok(idx) => idx,
-            Err(_) => match entry.best_name_match(&names) {
-                Ok(idx) => idx,
-                Err(_) => {
-                    println!("No match found for {}", entry.name);
-                    continue;
-                }
-            },
+        let Some((idx, _)) = entry.best_idx(&names, &emails) else {
+            println!("{} has no match", entry.name);
+            *no_matches.entry(entry.name.to_string()).or_default()+= entry.amount;
+            continue;
         };
+        
         println!(
-            "matched {} to {} ({} spent)",
-            entry.name, all_relations[idx].naam, entry.amount
+            "matched {} to {} ({} spent) (source {})",
+            entry.name, all_relations[idx].naam, entry.amount, all_relations[idx].source
         );
     }
     let matches = turf_list
@@ -92,20 +65,32 @@ fn main() {
             let eur = *eur;
             let a = AddChangeTransaction::new(
                 Date::today(),
-                "Turfjes Borrels door het jaar heen".to_string(),
+                "Introweekend".to_string(),
             );
             let a = if eur > Euro::default() {
-                a.add_debet("5001-10".to_string(), eur, "T2324-01".to_string(), r.code)
+                a.add_debet("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
             } else if eur < Euro::default() {
-                a.add_credit("5001-10".to_string(), eur, "T2324-01".to_string(), r.code)
+                a.add_credit("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
             } else {
                 a
             };
+            // println!("{:#?}", a);
+            // println!("{}", serde_json::to_string_pretty(&a).unwrap());
             a
         })
         .collect::<Vec<_>>();
-    let message = ConscriboMultiRequest::new(transactions);
-    // println!("{:#?}", message);
+    // let message = ConscriboMultiRequest::new(transactions);
+    println!("{:#?}", transactions);
+    // let res: MultiRootResult<TransactionResult> = client.do_multi_request(transactions).unwrap();
+    // let transactions = include_str!("../transactions.json");
+    // let res: ConscriboResult<_> = serde_json::from_str::<MultiRootResult<TransactionResult>>(transactions).unwrap().into();
+
+    // println!("{:#?}", res);
+    println!("Could not find the following people:");
+    for (name, amount) in no_matches {
+        println!("{}: {}", name, amount);
+    }
+
 }
 
 fn stuff(cfg: &penning_helper_config::ConscriboConfig) -> (Euro, Vec<u8>) {
@@ -482,6 +467,185 @@ fn factuur_generator(
         .push()
         .unwrap();
     doc.push(table);
+    let mut buf = vec![];
+    doc.render(&mut buf).unwrap();
+    buf
+}
+
+#[derive(Debug)]
+enum CurrentState {
+    New,
+    Used,
+    AsNew,
+    Custom(String),
+}
+
+impl Display for CurrentState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CurrentState::New => write!(f, "Nieuw"),
+            CurrentState::Used => write!(f, "Gebruikt"),
+            CurrentState::AsNew => write!(f, "Zo goed als nieuw"),
+            CurrentState::Custom(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+fn contract_generator(
+    cfg: &penning_helper_config::Config,
+    what: String,
+    start_date: Date,
+    end_date: Date,
+    state: CurrentState,
+    loaned_to: String,
+    loaned_by: String,
+) -> Vec<u8> {
+    let mut doc =
+        genpdf::Document::new(genpdf::fonts::from_files("./fonts", "Roboto", None).unwrap());
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(20);
+    doc.set_page_decorator(decorator);
+    doc.set_title("Uitleencontract");
+    let image = image::open("logo.png").unwrap();
+    let image = image.to_rgb8();
+    let w = image.width();
+    let max_w = 500;
+    let scale_w = max_w as f64 / w as f64;
+    let image = image::DynamicImage::ImageRgb8(image);
+
+    let mut layout = genpdf::elements::LinearLayout::vertical();
+
+    let mut table = genpdf::elements::TableLayout::new(vec![2, 1]);
+    table.set_cell_decorator(genpdf::elements::FrameCellDecorator::new(
+        false, false, false,
+    ));
+
+    table
+        .row()
+        .element(genpdf::elements::Paragraph::new(format!(
+            "Uitleencontract {}",
+            cfg.sepa().company_name
+        )).styled(genpdf::style::Style::new().with_font_size(24).bold()))
+        .element(
+            genpdf::elements::Image::from_dynamic_image(image)
+                .unwrap()
+                .with_alignment(genpdf::Alignment::Right)
+                .with_scale((scale_w, scale_w)),
+        )
+        .push()
+        .unwrap();
+    layout = layout.element(table);
+
+    let l = elements::LinearLayout::vertical()
+        .element(
+            elements::Paragraph::new(format!(
+                "Hierbij verklaart de ondergetekende dat het volgende eigendom van {}",
+                cfg.sepa().company_name
+            ))
+            .wrap_small_pad(),
+        )
+        .element({
+            let mut layout = elements::TableLayout::new(vec![1]);
+            layout
+                .row()
+                .element(elements::Paragraph::new(what).padded((7, 1)))
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        })
+        .element({
+            let mut layout = elements::TableLayout::new(vec![1]);
+            layout
+                .row()
+                .element(
+                    elements::Paragraph::new(format!("Huidige staat eigendom: {}", state))
+                        .padded((7, 1)),
+                )
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        })
+        .element(elements::Paragraph::new("Van:").wrap_small_pad())
+        .element({
+            let mut layout = elements::TableLayout::new(vec![1]);
+            layout
+                .row()
+                .element(
+                    elements::Paragraph::new(format!("Uitgeleend door: {}", loaned_by))
+                        .padded((7, 1)),
+                )
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        })
+        .element(elements::Paragraph::new("Tussen:").wrap_small_pad())
+        .element({
+            let mut layout = elements::TableLayout::new(vec![1, 1]);
+            layout
+                .row()
+                .element(elements::Paragraph::new(format!("Startdatum: {}", start_date)).padded((7, 1)))
+                .element(elements::Paragraph::new("Starttijd: ").padded((7, 1)))
+                .push()
+                .unwrap();
+            layout
+                .row()
+                .element(elements::Paragraph::new(format!("Einddatum: {}", end_date)).padded((7, 1)))
+                .element(elements::Paragraph::new("Eindtijd: ").padded((7, 1)))
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        })
+        .element(elements::Paragraph::new("Aan:").wrap_small_pad())
+        .element({
+            let mut layout = elements::TableLayout::new(vec![1]);
+            layout
+                .row()
+                .element(
+                    elements::Paragraph::new(format!("Uitgeleend aan: {}", loaned_to))
+                        .padded((7, 1)),
+                )
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        })
+        .element(
+            
+                paragraphs!(
+                    "onder de verantwoordelijkheid van de ondergetekende valt.","De einddatum is tevens de datum waarop het eigendom terug wordt gegeven aan AEGEE-Delft.",
+                    "Wanneer er schade ontstaat aan het eigendom/de eigendommen in de bovenstaande periode, dan zal de ondergetekende de geleden schade vergoeden.",
+                    "Dit gebeurt in overleg en zal in de meeste gevallen neerkomen op:",
+                    "    a. Reparatie vergoeden",
+                    "    b. Dagwaarde vergoeden",
+                    "    c. Het aanbieden/vergoeden van een vergelijkbaar product",
+                    "    d. Vermindering in waarde door de geleden schade vergoeden",
+                )
+        )
+        .element({
+            let mut layout = elements::TableLayout::new(vec![2, 1]);
+            layout
+                .row()
+                .element(elements::Paragraph::new("Voorletters en Achternaam:").padded((1,1,13,1)))
+                .element(elements::Paragraph::new("Handtekening: ").padded((1,1,20,1)))
+                .push()
+                .unwrap();
+            layout.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+            layout
+        }.padded((3,0)));
+
+    layout = layout.element(l);
+
+    doc.push(layout);
     let mut buf = vec![];
     doc.render(&mut buf).unwrap();
     buf

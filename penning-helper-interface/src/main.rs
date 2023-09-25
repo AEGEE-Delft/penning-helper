@@ -1,17 +1,24 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use std::io::{self, Write};
+
+// hide console window on Windows in release
 use eframe::{
-    egui::{self, Window},
+    egui::{self, Slider, TextBuffer, TextEdit, Ui, Window},
+    emath::Align2,
     epaint::vec2,
+    Storage,
 };
-use egui::Visuals;
+use egui::{Color32, ColorImage, Label, Vec2, Visuals};
 use egui_dock::{NodeIndex, Style, Tree};
 use egui_extras::{Column, TableBuilder};
+use penning_helper_config::Config;
+use penning_helper_conscribo::Relation;
 use penning_helper_turflists::turflist::TurfList;
 
 fn main() {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "My egui App",
+        "Penning Helper",
         native_options,
         Box::new(|cc| Box::new(MyEguiApp::new(cc))),
     )
@@ -21,9 +28,8 @@ fn main() {
 #[derive(Default)]
 struct MyEguiApp {
     visuals: Visuals,
-    loaded_turflist: Option<TurfList>,
-    settings_shown: bool,
     tabs: MyTabs,
+    settings_window: SettingsWindow,
 }
 
 impl MyEguiApp {
@@ -32,25 +38,170 @@ impl MyEguiApp {
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
-        Self::default()
+
+        Self::with_config(Config::load_from_file())
     }
+
+    fn with_config(config: Config) -> Self {
+        Self {
+            settings_window: SettingsWindow {
+                config,
+                ..Default::default()
+            },
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SettingsWindow {
+    open: bool,
+    config: Config,
+}
+
+impl SettingsWindow {
+    pub fn show(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let mut open = self.open;
+        Window::new("Settings")
+            .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, (0.0, 0.0))
+            .default_size(vec2(512.0, 512.0))
+            .scroll2([true, false])
+            .show(ctx, |ui| self.actual_show(ui, frame));
+        if open && !self.open {
+            self.open = false;
+        } else if !open && self.open {
+            self.open = false;
+        }
+    }
+
+    fn actual_show(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        ui.heading("Current Year");
+        labelled_row(
+            ui,
+            "Current year:",
+            self.config.year_format_mut(),
+            Some("2324"),
+        );
+        ui.heading("SEPA");
+        labelled_row(
+            ui,
+            "IBAN",
+            &mut self.config.sepa_mut().company_iban,
+            Some("NL12ABCD0123456789"),
+        );
+        labelled_row(
+            ui,
+            "BIC",
+            &mut self.config.sepa_mut().company_bic,
+            Some("ABCDNL2A"),
+        );
+        labelled_row(
+            ui,
+            "Name",
+            &mut self.config.sepa_mut().company_name,
+            Some("AEGEE-Delft"),
+        );
+        labelled_row(
+            ui,
+            "Incasso ID",
+            &mut self.config.sepa_mut().company_id,
+            Some("NL00ZZZ404840000000"),
+        );
+        ui.heading("Conscribo");
+        labelled_row(
+            ui,
+            "Username",
+            &mut self.config.conscribo_mut().username,
+            Some("admin"),
+        );
+        ui.vertical(|ui| {
+            ui.label("Password");
+            ui.add(
+                TextEdit::singleline(&mut self.config.conscribo_mut().password)
+                    .hint_text("hunter2")
+                    .password(true),
+            );
+        });
+        labelled_row(
+            ui,
+            "URL",
+            &mut self.config.conscribo_mut().url,
+            Some("https://secure.conscribo.nl/aegee-delft/request.json"),
+        );
+        ui.heading("Mail");
+        labelled_row(
+            ui,
+            "SMTP Server",
+            &mut self.config.mail_mut().smtp_server,
+            Some("smtp.gmail.com"),
+        );
+        let t = self.config.mail_mut().smtp_port;
+        let mut s = if t == 0 {
+            "".to_string()
+        } else {
+            t.to_string()
+        };
+        ui.vertical(|ui| {
+            ui.label("SMTP Port");
+            ui.add(TextEdit::singleline(&mut s).char_limit(5).hint_text("587"));
+        });
+        self.config.mail_mut().smtp_port = if s.is_empty() {
+            0
+        } else {
+            s.parse().unwrap_or(t)
+        };
+
+        labelled_row(
+            ui,
+            "SMTP Username",
+            &mut self.config.mail_mut().credentials.username,
+            Some("testkees@me.org"),
+        );
+        ui.vertical(|ui| {
+            ui.label("SMTP Password");
+            ui.add(
+                TextEdit::singleline(&mut self.config.mail_mut().credentials.password)
+                    .hint_text("hunter2")
+                    .password(true),
+            );
+        });
+        // labelled_row(ui, "From", &mut self.config.mail_mut().from);
+        // labelled_row(ui, "To", &mut self.config.mail_mut().to);
+        // labelled_row(ui, "Subject", &mut self.config.mail_mut().subject);
+        ui.horizontal(|ui| {
+            if ui.button("Save").clicked() {
+                self.config.save_to_file();
+                self.open = false;
+            }
+            if ui.button("Cancel").clicked() {
+                self.open = false;
+            }
+        });
+    }
+}
+
+fn labelled_row(ui: &mut Ui, name: &str, line: &mut String, hint: Option<&'static str>) {
+    ui.vertical(|ui| {
+        ui.label(name);
+        TextEdit::singleline(line)
+            .hint_text(hint.unwrap_or(""))
+            .show(ui);
+    });
 }
 
 impl eframe::App for MyEguiApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.settings_window.show(ctx, frame);
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     self.visuals.light_dark_radio_buttons(ui);
                     ctx.set_visuals(self.visuals.clone());
                     if ui.button("Settings").clicked() {
-                        self.settings_shown = true;
-                        Window::new("Settings")
-                            .open(&mut self.settings_shown)
-                            .default_size(vec2(512.0, 512.0))
-                            .show(ctx, |ui| {
-                                ui.label("Settings");
-                            });
+                        self.settings_window.open = true;
+                        ui.close_menu();
                     }
                     if ui.button("Quit").clicked() {
                         frame.close();
@@ -61,8 +212,14 @@ impl eframe::App for MyEguiApp {
             })
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.tabs.ui(ui);
+            ui.add_enabled_ui(!self.settings_window.open, |ui| self.tabs.ui(ui))
         });
+
+        egui::TopBottomPanel::bottom("bottom_panel")
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.colored_label(Color32::LIGHT_GRAY, "Made by Julius de Jeu");
+            });
         // egui::CentralPanel::default().show(ctx, |ui| {
         //     ui.heading("Penning Helper");
 
@@ -168,45 +325,144 @@ impl eframe::App for MyEguiApp {
     }
 }
 
+#[derive(Clone, Debug)]
 struct MyTabs {
-    tree: Tree<String>,
+    tree: Tree<ContentThing>,
+    members: Vec<Relation>,
 }
 
 impl Default for MyTabs {
     fn default() -> Self {
-        Self::new()
+        Self::new(&[])
     }
 }
 
 impl MyTabs {
-    pub fn new() -> Self {
-        let tab1 = "tab1".to_string();
-        let tab2 = "tab2".to_string();
-
-        let mut tree = Tree::new(vec![tab1]);
-        tree.split_left(NodeIndex::root(), 0.20, vec![tab2]);
-
-        Self { tree }
+    pub fn new(members: &[Relation]) -> Self {
+        let mut tree = Tree::new(vec![ContentThing::Info]);
+        tree.set_focused_node(NodeIndex::root());
+        Self {
+            tree,
+            members: members.to_vec(),
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
+        let mut nodes = vec![];
         egui_dock::DockArea::new(&mut self.tree)
             .style(Style::from_egui(ui.style().as_ref()))
-            .show_close_buttons(false)
-            .show_inside(ui, &mut TabViewer {});
+            .show_close_buttons(true)
+            .show_add_buttons(true)
+            .show_add_popup(true)
+            .show_inside(
+                ui,
+                &mut TabViewer {
+                    added_nodes: &mut nodes,
+                },
+            );
+        nodes.drain(..).for_each(|(node, content)| {
+            self.tree.set_focused_node(node);
+            self.tree.push_to_focused_leaf(content)
+        })
     }
 }
 
-struct TabViewer;
+#[derive(Clone, Debug)]
+enum ContentThing {
+    Info,
+    TurflistImport(TurflistImport),
+    DrinkImport(DrinkImport),
+}
 
-impl egui_dock::TabViewer for TabViewer {
-    type Tab = String;
+impl ContentThing {
+    pub fn title(&self) -> &'static str {
+        match self {
+            ContentThing::Info => "Info",
+            ContentThing::TurflistImport(_) => "Turflist Import",
+            ContentThing::DrinkImport(_) => "Borrel Import",
+        }
+    }
+
+    pub fn modified(&self) -> bool {
+        match self {
+            ContentThing::Info => true,
+            ContentThing::TurflistImport(_) => false,
+            ContentThing::DrinkImport(_) => false,
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut Ui) {
+        match self {
+            ContentThing::Info => InfoTab::ui(ui),
+            ContentThing::TurflistImport(tli) => todo!(),
+            ContentThing::DrinkImport(tli) => todo!(),
+        }
+    }
+}
+
+struct InfoTab;
+
+impl InfoTab {
+    pub fn ui(ui: &mut Ui) {
+        ui.heading("Penning Helper");
+        ui.label("Penning Helper is a tool to help with the administration of AEGEE-Delft.");
+        ui.label("It can be used to import turflists from the members portal and to import borrels from loyverse.");
+        ui.label("But really as long as you give it an excel file with some specific columns it'll happily work with it.");
+        ui.label("It can also be used to generate SEPA files for the bank,");
+        ui.label("and can send automated emails to the members that have an open balance to inform them that they have to pay.");
+        egui_extras::RetainedImage::from_color_image("memes", ColorImage::example())
+            .show_max_size(ui, Vec2::new(ui.available_width(), 256.0));
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct TurflistImport {
+    turflist: Option<TurfList>,
+    path: Option<std::path::PathBuf>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DrinkImport {
+    turflist: Option<TurfList>,
+    path: Option<std::path::PathBuf>,
+}
+
+struct TabViewer<'a> {
+    added_nodes: &'a mut Vec<(NodeIndex, ContentThing)>,
+}
+
+impl<'a> egui_dock::TabViewer for TabViewer<'a> {
+    type Tab = ContentThing;
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        ui.label(format!("Content of {tab}"));
+        tab.show(ui);
+    }
+
+    fn add_popup(&mut self, ui: &mut egui::Ui, node: NodeIndex) {
+        ui.vertical(|ui| {
+            ui.set_min_width(128.0);
+            if ui.button("Turflist Import").clicked() {
+                self.added_nodes.push((
+                    node,
+                    ContentThing::TurflistImport(TurflistImport::default()),
+                ));
+            }
+            if ui.button("Borrel Import").clicked() {
+                self.added_nodes
+                    .push((node, ContentThing::DrinkImport(DrinkImport::default())));
+            }
+        });
+    }
+
+    fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
+        !tab.modified()
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        (&*tab).into()
+        if tab.modified() && !matches!(tab, ContentThing::Info) {
+            format!("{}*", tab.title()).into()
+        } else {
+            tab.title().into()
+        }
     }
 }
