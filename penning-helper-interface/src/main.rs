@@ -12,7 +12,7 @@ use std::{
 };
 
 use eframe::egui::{self, Ui};
-use egui::{CentralPanel, Color32, ColorImage, TextEdit, TopBottomPanel, Vec2, Visuals};
+use egui::{CentralPanel, Color32, ColorImage, RichText, TextEdit, TopBottomPanel, Vec2, Visuals};
 use egui_dock::{NodeIndex, Style, Tree};
 use egui_extras::{Column, TableBuilder};
 use file_receiver::{FileReceievers, FileReceiverResult, FileReceiverSource};
@@ -244,109 +244,6 @@ impl eframe::App for PenningHelperApp {
                 self.tabs = tabs;
             })
         });
-
-        // egui::CentralPanel::default().show(ctx, |ui| {
-        //     ui.heading("Penning Helper");
-
-        //     if ui
-        //         .button("Load Turflist")
-        //         .on_hover_text("Load a turflist from a CSV file")
-        //         .clicked()
-        //     {
-        //         let path = rfd::FileDialog::new()
-        //             .add_filter("CSV", &["csv"])
-        //             .pick_file();
-        //         if let Some(path) = path {
-        //             let list = std::fs::File::open(path).unwrap();
-        //             self.loaded_turflist = penning_helper_turflists::csv::read_csv(list)
-        //                 .map(|mut l| {
-        //                     l.shrink();
-        //                     l
-        //                 })
-        //                 .map_err(|e| e.to_string())
-        //                 .ok();
-        //         }
-        //     }
-
-        //     if ui
-        //         .button("Load Members portal list")
-        //         .on_hover_text("Load an Excel turf list")
-        //         .clicked()
-        //     {
-        //         let path = rfd::FileDialog::new()
-        //             .add_filter("Excel File", &["xlsx", "xls", "xlsm", "xlsb"])
-        //             .pick_file();
-        //         if let Some(path) = path {
-        //             self.loaded_turflist =
-        //                 penning_helper_turflists::xlsx::read_excel(path, (1, 0).into())
-        //                     .map(|mut l| {
-        //                         l.shrink();
-        //                         l
-        //                     })
-        //                     .map_err(|e| e.to_string())
-        //                     .ok();
-        //         }
-        //     }
-        //     TableBuilder::new(ui)
-        //         .striped(true)
-        //         .columns(Column::remainder(), 4)
-        //         .header(20.0, |mut r| {
-        //             r.col(|ui| {
-        //                 ui.strong("Name");
-        //             });
-        //             r.col(|ui| {
-        //                 ui.strong("Email");
-        //             });
-        //             r.col(|ui| {
-        //                 ui.strong("Amount");
-        //             });
-        //             r.col(|ui| {
-        //                 ui.strong("IBAN");
-        //             });
-        //         })
-        //         .body(|mut body| {
-        //             if let Some(t) = &self.loaded_turflist {
-        //                 for row in t.iter() {
-        //                     body.row(20.0, |mut r| {
-        //                         r.col(|ui| {
-        //                             ui.label(&row.name);
-        //                         });
-        //                         r.col(|ui| {
-        //                             ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
-        //                         });
-        //                         r.col(|ui| {
-        //                             ui.label(&row.amount.to_string());
-        //                         });
-        //                         r.col(|ui| {
-        //                             ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
-        //                         });
-        //                     });
-        //                 }
-        //             }
-        //         });
-
-        //     // egui::ScrollArea::new([true, true]).show(ui, |ui| {
-        //     //     egui::Grid::new("grid")
-        //     //         .striped(true)
-        //     //         .num_columns(4)
-        //     //         .show(ui, |ui| {
-        //     //             ui.label("Name");
-        //     //             ui.label("Email");
-        //     //             ui.label("Amount");
-        //     //             ui.label("IBAN");
-        //     //             ui.end_row();
-        //     //             if let Some(t) = &self.loaded_turflist {
-        //     //                 for row in t.iter() {
-        //     //                     ui.label(&row.name);
-        //     //                     ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
-        //     //                     ui.label(&row.amount.to_string());
-        //     //                     ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
-        //     //                     ui.end_row();
-        //     //                 }
-        //     //             }
-        //     //         });
-        //     // });
-        // });
     }
 }
 
@@ -578,6 +475,7 @@ impl TurflistImport {
                 if ui.button("Open Turflist").clicked() {
                     self.turflist = None;
                     foobar.files.new_receiver(FileReceiverSource::TurfList);
+                    self.price = Default::default();
                 };
                 if let Some(list) = foobar.files.get_receiver(FileReceiverSource::TurfList) {
                     match list.get_file() {
@@ -602,6 +500,8 @@ impl TurflistImport {
                                     } else {
                                         println!("haha");
                                         ui.label(format!("Price: {}", self.price));
+                                        foobar.popups.remove("Price");
+                                        println!("{:?}", foobar.popups.keys());
 
                                         match penning_helper_turflists::xlsx::read_excel(
                                             f, self.price,
@@ -649,10 +549,13 @@ impl TurflistImport {
         });
         CentralPanel::default().show(ui.ctx(), |ui| {
             TableBuilder::new(ui)
-                .columns(Column::remainder().at_least(50.0), 4)
+                .columns(Column::remainder().at_least(50.0), 5)
                 .header(20.0, |mut r| {
                     r.col(|ui| {
                         ui.strong("Name");
+                    });
+                    r.col(|ui| {
+                        ui.strong("Original Name");
                     });
                     r.col(|ui| {
                         ui.strong("Email");
@@ -665,19 +568,42 @@ impl TurflistImport {
                     });
                 })
                 .body(|mut b| {
+                    let names = members.iter().map(|m| m.naam.clone()).collect::<Vec<_>>();
+                    let emails = members
+                        .iter()
+                        .map(|m| m.email_address.clone())
+                        .collect::<Vec<_>>();
                     for row in self.turflist.iter().flat_map(|t| t.iter()) {
+                        let (name, email, amount, member) = 
+                        if let Some((idx, price)) = row.best_idx(&names, &emails) {
+                            let member = &members[idx];
+                            (member.naam.clone(), member.email_address.clone(), price, Some(member))
+                        } else {
+                            (row.name.clone(), row.email.clone().unwrap_or_else(|| String::new()), row.amount, None)
+                        };
+                        
                         b.row(20.0, |mut r| {
+                            r.col(|ui| {
+                                ui.label({
+                                    let t = RichText::new(&name);
+                                    if member.is_none() {
+                                        t.color(ui.visuals().warn_fg_color)
+                                    } else {
+                                        t
+                                    }
+                                });
+                            });
                             r.col(|ui| {
                                 ui.label(&row.name);
                             });
                             r.col(|ui| {
-                                ui.label(*&row.email.as_ref().unwrap_or(&"".to_string()));
+                                ui.label(email);
                             });
                             r.col(|ui| {
-                                ui.label(&row.amount.to_string());
+                                ui.label(amount.to_string());
                             });
                             r.col(|ui| {
-                                ui.label(*&row.iban.as_ref().unwrap_or(&"".to_string()));
+                                ui.label(format!("{}", member.is_some()));
                             });
                         });
                     }
