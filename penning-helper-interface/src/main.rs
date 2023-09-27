@@ -4,13 +4,11 @@
 use std::{
     cmp::min,
     collections::HashMap,
-    default,
     ffi::OsStr,
     fs::File,
     ops::{Add, Deref, DerefMut, Index},
-    path::PathBuf,
     sync::{
-        mpsc::{channel, Receiver, Sender, sync_channel, SyncSender},
+        mpsc::{channel, Receiver, Sender},
         OnceLock,
     },
     time::{Duration, Instant, SystemTime},
