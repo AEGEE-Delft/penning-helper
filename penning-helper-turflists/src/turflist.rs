@@ -1,7 +1,7 @@
 use penning_helper_types::Euro;
 use textdistance::nstr::damerau_levenshtein;
 
-use crate::matcher::MatchResult;
+use crate::{matcher::MatchResult, matched_turflist::{MatchedTurflist, MatchedTurflistRow}};
 
 #[derive(Debug, Clone)]
 pub struct TurfList {
@@ -32,6 +32,19 @@ impl TurfList {
         new_rows.sort_by_key(|r| r.amount);
         new_rows.reverse();
         self.rows = new_rows;
+    }
+
+    pub fn get_matches(
+        &self,
+        names: &[String],
+        emails: &[String],
+    ) -> MatchedTurflist {
+        let rows = self
+            .rows
+            .iter()
+            .map(|r| r.to_matched(names, emails))
+            .collect();
+        MatchedTurflist::new(rows)
     }
 
     pub fn rows(&self) -> &[TurfListRow] {
@@ -119,6 +132,12 @@ impl TurfListRow {
             },
         };
         Some((idx, self.amount))
+    }
+
+    pub fn to_matched(&self, names: &[String], emails: &[String]) -> MatchedTurflistRow {
+        let best_idx = self.best_idx(names, emails);
+        let idx = best_idx.map(|(idx, _)| idx);
+        MatchedTurflistRow::new(idx, self.clone())
     }
 }
 

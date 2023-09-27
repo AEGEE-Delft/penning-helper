@@ -8,6 +8,7 @@ use std::{
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum FileReceiverSource {
     TurfList,
+    SepaSaveLoc,
 }
 
 impl FileReceiverSource {
@@ -17,6 +18,7 @@ impl FileReceiverSource {
                 ("Excel File", &["xlsx", "xls", "xlsm", "xlsb"]),
                 ("CSV", &["csv"]),
             ],
+            FileReceiverSource::SepaSaveLoc => todo!(),
         }
     }
 }
@@ -29,6 +31,7 @@ pub struct FileReceievers {
 
 impl FileReceievers {
     pub fn new_receiver(&mut self, source: FileReceiverSource) {
+        println!("Adding new receiver: {:?}", source);
         self.received.remove(&source);
         let extensions = source.extensions();
         self.receivers
@@ -70,6 +73,10 @@ pub enum FileReceiverResult<'p> {
 
 impl FileReceiver {
     pub fn receive_file(extensions: &[(&str, &[&str])]) -> Self {
+        Self::recv_or_save(extensions, false)
+    }
+
+    pub fn recv_or_save(extensions: &[(&str, &[&str])], save: bool) -> Self {
         let (s, receiver) = channel();
         let mut dialog = rfd::FileDialog::new();
         for (name, exts) in extensions {

@@ -12,14 +12,20 @@ use std::{
 };
 
 use eframe::egui::{self, Ui};
-use egui::{CentralPanel, Color32, ColorImage, RichText, TextEdit, TopBottomPanel, Vec2, Visuals};
+use egui::{
+    plot::Text, CentralPanel, Color32, ColorImage, RichText, TextEdit, TopBottomPanel, Vec2,
+    Visuals,
+};
 use egui_dock::{NodeIndex, Style, Tree};
 use egui_extras::{Column, TableBuilder};
 use file_receiver::{FileReceievers, FileReceiverResult, FileReceiverSource};
 use penning_helper_config::{Config, ConscriboConfig};
-use penning_helper_conscribo::{ConscriboClient, Relation};
-use penning_helper_turflists::turflist::TurfList;
-use penning_helper_types::Euro;
+use penning_helper_conscribo::{
+    AddChangeTransaction, ConscriboClient, ConscriboResult, Relation, TransactionResult,
+    UnifiedTransaction,
+};
+use penning_helper_turflists::{matched_turflist::MatchedTurflist, turflist::TurfList};
+use penning_helper_types::{Date, Euro};
 use popup::{ErrorThing, Popup};
 
 use settings::SettingsWindow;
@@ -27,6 +33,7 @@ use settings::SettingsWindow;
 mod file_receiver;
 mod popup;
 mod settings;
+mod background_requester;
 
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
@@ -51,6 +58,7 @@ struct PenningHelperApp {
     popups: HashMap<String, Popup>,
     conscribo_client: ConscriboConnector,
     r: Option<Receiver<String>>,
+    members: Vec<Relation>,
 }
 
 struct FooBar<'t> {
@@ -58,6 +66,7 @@ struct FooBar<'t> {
     conscribo: &'t ConscriboConnector,
     files: &'t mut FileReceievers,
     cfg: &'t Config,
+    members: &'t [Relation],
 }
 
 impl<'t> FooBar<'t> {
@@ -67,6 +76,7 @@ impl<'t> FooBar<'t> {
             conscribo: &app.conscribo_client,
             files: &mut app.file_channels,
             cfg: &app.settings_window.config,
+            members: &app.members,
         }
     }
 }
@@ -80,20 +90,20 @@ struct ConscriboConnector {
 }
 
 impl ConscriboConnector {
-    fn connect(&mut self, cfg: &ConscriboConfig) {
+    fn connect(&mut self, cfg: &ConscriboConfig) -> bool {
         // don't try to log in when already logged in
         if self.client.is_some() {
-            return;
+            return true;
         }
         let username = cfg.username.clone();
         let password = cfg.password.clone();
         // don't try to log in when username or password is same as stored (and potentially not working)
         if self.username == username && self.password == password {
-            return;
+            return false;
         }
         // don't try to log in when username or password is empty
         if username.is_empty() || password.is_empty() {
-            return;
+            return false;
         }
 
         self.username = username;
@@ -101,7 +111,7 @@ impl ConscriboConnector {
         println!("Attempting actual login");
         if self.n > 2 {
             println!("Too many attempts, not trying again");
-            return;
+            return false;
         }
         self.client = {
             match ConscriboClient::new(&self.username, &self.password, &cfg.url) {
@@ -117,8 +127,10 @@ impl ConscriboConnector {
         };
         if self.client.is_some() {
             println!("Connected to Conscribo");
+            return true;
         }
         self.n += 1;
+        false
     }
 
     pub fn run<F: FnOnce(&ConscriboClient) -> R, R>(&self, f: F) -> Option<R> {
@@ -148,9 +160,9 @@ impl PenningHelperApp {
         }
     }
 
-    fn login_conscribo(&mut self) {
+    fn login_conscribo(&mut self) -> bool {
         if self.settings_window.open {
-            return;
+            return false;
         }
         let conscribo_cfg = self.settings_window.config.conscribo();
         self.conscribo_client.connect(conscribo_cfg)
@@ -164,7 +176,27 @@ impl eframe::App for PenningHelperApp {
             p.show(ctx);
         }
         self.file_channels.receive_all();
-        self.login_conscribo();
+        if self.login_conscribo() {
+            if self.members.is_empty() {
+                let relations = self.conscribo_client.run(|c| {
+                    let members = c.get_relations("lid").unwrap();
+                    let others = c.get_relations("onbekend").unwrap();
+                    let others = others
+                        .into_iter()
+                        .filter(|o| !members.iter().any(|m| m.naam == o.naam))
+                        .collect::<Vec<_>>();
+                    let all_relations = members
+                        .into_iter()
+                        .chain(others.into_iter())
+                        // .filter(|r| r.naam == "Julius de Jeu")
+                        .collect::<Vec<_>>();
+                    all_relations
+                });
+                if let Some(relations) = relations {
+                    self.members = relations;
+                }
+            }
+        }
         if let Some(r) = &self.r {
             if let Ok(r) = r.try_recv() {
                 self.popups.insert(
@@ -181,6 +213,10 @@ impl eframe::App for PenningHelperApp {
                     ctx.set_visuals(self.visuals.clone());
                     if ui.button("Settings").clicked() {
                         self.settings_window.open = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Refresh memberlist").clicked() {
+                        self.members = vec![];
                         ui.close_menu();
                     }
                     if ui.button("Load File").clicked() {
@@ -250,45 +286,22 @@ impl eframe::App for PenningHelperApp {
 #[derive(Clone, Debug)]
 struct MyTabs {
     tree: Tree<ContentThing>,
-    members: Vec<Relation>,
 }
 
 impl Default for MyTabs {
     fn default() -> Self {
-        Self::new(&[])
+        Self::new()
     }
 }
 
 impl MyTabs {
-    pub fn new(members: &[Relation]) -> Self {
+    pub fn new() -> Self {
         let mut tree = Tree::new(vec![ContentThing::Info]);
         tree.set_focused_node(NodeIndex::root());
-        Self {
-            tree,
-            members: members.to_vec(),
-        }
+        Self { tree }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, foobar: FooBar) {
-        if self.members.is_empty() {
-            let relations = foobar.conscribo.run(|c| {
-                let members = c.get_relations("lid").unwrap();
-                let others = c.get_relations("onbekend").unwrap();
-                let others = others
-                    .into_iter()
-                    .filter(|o| !members.iter().any(|m| m.naam == o.naam))
-                    .collect::<Vec<_>>();
-                let all_relations = members
-                    .into_iter()
-                    .chain(others.into_iter())
-                    // .filter(|r| r.naam == "Julius de Jeu")
-                    .collect::<Vec<_>>();
-                all_relations
-            });
-            if let Some(relations) = relations {
-                self.members = relations;
-            }
-        }
         let mut nodes = vec![];
         egui_dock::DockArea::new(&mut self.tree)
             .style(Style::from_egui(ui.style().as_ref()))
@@ -299,7 +312,7 @@ impl MyTabs {
                 ui,
                 &mut TabViewer {
                     added_nodes: &mut nodes,
-                    members: &self.members,
+                    members: &foobar.members,
                     foobar,
                 },
             );
@@ -315,7 +328,7 @@ enum ContentThing {
     Info,
     MemberInfo(MemberInfo),
     TurflistImport(TurflistImport),
-    DrinkImport(DrinkImport),
+    SepaGen(SepaGen),
 }
 
 impl ContentThing {
@@ -324,7 +337,7 @@ impl ContentThing {
             ContentThing::Info => "Info",
             ContentThing::MemberInfo(_) => "Member Info",
             ContentThing::TurflistImport(_) => "Turflist Import",
-            ContentThing::DrinkImport(_) => "Borrel Import",
+            ContentThing::SepaGen(_) => "Invoice Generator",
         }
     }
 
@@ -333,7 +346,7 @@ impl ContentThing {
             ContentThing::Info => true,
             ContentThing::MemberInfo(_) => false,
             ContentThing::TurflistImport(_) => false,
-            ContentThing::DrinkImport(_) => false,
+            ContentThing::SepaGen(_) => false,
         }
     }
 
@@ -342,7 +355,14 @@ impl ContentThing {
             ContentThing::Info => InfoTab::ui(ui, cfg),
             ContentThing::MemberInfo(mi) => mi.ui(ui, cfg, members),
             ContentThing::TurflistImport(tli) => tli.ui(ui, cfg, members),
-            ContentThing::DrinkImport(tli) => todo!(),
+            ContentThing::SepaGen(sg) => sg.ui(ui, cfg, members),
+        }
+    }
+
+    pub fn file_handle(&self) -> Option<FileReceiverSource> {
+        match self {
+            ContentThing::TurflistImport(_) => Some(FileReceiverSource::TurfList),
+            _ => None,
         }
     }
 }
@@ -447,175 +467,305 @@ struct TurflistImport {
     reference: String,
     turflist: Option<TurfList>,
     path: Option<std::path::PathBuf>,
+    matched: Option<MatchedTurflist>,
     price: Euro,
+    last_len: usize,
 }
 
 impl TurflistImport {
     pub fn ui(&mut self, ui: &mut Ui, foobar: &mut FooBar, members: &[Relation]) {
-        TopBottomPanel::top(ui.next_auto_id()).show(ui.ctx(), |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Rekening");
-                TextEdit::singleline(&mut self.rekening)
-                    .hint_text("0000-00")
-                    .show(ui);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Description");
-                TextEdit::singleline(&mut self.description)
-                    .hint_text("Description")
-                    .show(ui);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Reference");
-                TextEdit::singleline(&mut self.reference)
-                    .hint_text("T0011-00")
-                    .show(ui);
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Open Turflist").clicked() {
-                    self.turflist = None;
-                    foobar.files.new_receiver(FileReceiverSource::TurfList);
-                    self.price = Default::default();
-                };
-                if let Some(list) = foobar.files.get_receiver(FileReceiverSource::TurfList) {
-                    match list.get_file() {
-                        FileReceiverResult::File(f) => {
-                            ui.label(format!("File: {:?}", f));
-                            if self.turflist.is_none() {
-                                let ext = f.extension().unwrap_or_else(|| OsStr::new(""));
-                                if ext == "csv" {
-                                    ui.label("CSV");
-                                } else if ext == "xlsx" {
-                                    ui.label("Excel");
-                                    println!("Got here!");
-                                    if self.price == (0, 0).into() {
-                                        let res =
-                                            foobar.popups.entry("Price".to_string()).or_insert(
-                                                Popup::new_default::<(String, f64)>("Price"),
-                                            );
-                                        if let Some(v) = res.value::<String>() {
-                                            self.price = v.parse().unwrap_or((0, 0).into());
-                                            foobar.popups.remove("Price");
-                                        }
-                                    } else {
-                                        println!("haha");
-                                        ui.label(format!("Price: {}", self.price));
+        // TopBottomPanel::top(ui.next_auto_id()).show(ui.ctx(), |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Rekening");
+            TextEdit::singleline(&mut self.rekening)
+                .hint_text("0000-00")
+                .show(ui);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Description");
+            TextEdit::singleline(&mut self.description)
+                .hint_text("Description")
+                .show(ui);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Reference");
+            TextEdit::singleline(&mut self.reference)
+                .hint_text("T0011-00")
+                .show(ui);
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Open Turflist").clicked() {
+                self.turflist = None;
+                foobar.files.new_receiver(FileReceiverSource::TurfList);
+                self.price = Default::default();
+            };
+            if let Some(list) = foobar.files.get_receiver(FileReceiverSource::TurfList) {
+                println!("Receiver exists!");
+                match list.get_file() {
+                    FileReceiverResult::File(f) => {
+                        ui.label(format!("File: {:?}", f));
+                        if self.turflist.is_none() {
+                            println!("Turflist was none");
+                            let ext = f.extension().unwrap_or_else(|| OsStr::new(""));
+                            if ext == "csv" {
+                                ui.label("CSV");
+                            } else if ext == "xlsx" {
+                                ui.label("Excel");
+                                if self.price == (0, 0).into() {
+                                    let res = foobar
+                                        .popups
+                                        .entry("Price".to_string())
+                                        .or_insert(Popup::new_default::<(String, f64)>("Price"));
+                                    if let Some(v) = res.value::<String>() {
+                                        self.price = v.parse().unwrap_or((0, 0).into());
                                         foobar.popups.remove("Price");
-                                        println!("{:?}", foobar.popups.keys());
+                                    }
+                                } else {
+                                    ui.label(format!("Price: {}", self.price));
+                                    foobar.popups.remove("Price");
 
-                                        match penning_helper_turflists::xlsx::read_excel(
-                                            f, self.price,
-                                        )
+                                    match penning_helper_turflists::xlsx::read_excel(f, self.price)
                                         .map(|mut l| {
                                             l.shrink();
                                             l
                                         })
                                         .map_err(|e| e.to_string())
-                                        {
-                                            Ok(o) => self.turflist = Some(o),
-                                            Err(e) => {
-                                                if let Some(s) = ERROR_STUFF.get() {
-                                                    s.send(e).unwrap();
-                                                }
+                                    {
+                                        Ok(mut o) => {
+                                            // let names = members
+                                            //     .iter()
+                                            //     .map(|m| m.naam.clone())
+                                            //     .collect::<Vec<_>>();
+                                            // let emails = members
+                                            //     .iter()
+                                            //     .map(|m| m.email_address.clone())
+                                            //     .collect::<Vec<_>>();
+                                            // self.matched = Some(o.get_matches(&names, &emails));
+                                            o.shrink();
+                                            self.turflist = Some(o);
+                                            self.matched = None;
+                                        }
+                                        Err(e) => {
+                                            if let Some(s) = ERROR_STUFF.get() {
+                                                s.send(e).unwrap();
                                             }
                                         }
                                     }
-                                } else {
-                                    ui.label("Invalid file type");
                                 }
-                                println!("Got here!")
+                            } else {
+                                ui.label("Invalid file type");
                             }
                         }
-                        FileReceiverResult::NoFile => {
-                            ui.label("No file selected.");
+                    }
+                    FileReceiverResult::NoFile => {
+                        ui.label("No file selected.");
+                    }
+                    FileReceiverResult::Waiting => {
+                        ui.label("Waiting for file");
+                    }
+                };
+            }
+            if let Some(t) = &self.matched {
+                if ui.button("Append to Conscribo").clicked() {
+                    let transactions = t
+                        .iter()
+                        .flat_map(|m| m.idx().map(|idx| (&members[idx], m.amount)))
+                        .map(|(r, eur)| {
+                            let a =
+                                AddChangeTransaction::new(Date::today(), self.description.clone());
+                            let a = if eur > Euro::default() {
+                                a.add_debet(
+                                    self.rekening.clone(),
+                                    eur,
+                                    self.reference.clone(),
+                                    r.code,
+                                )
+                            } else {
+                                a.add_credit(
+                                    self.rekening.clone(),
+                                    eur,
+                                    self.reference.clone(),
+                                    r.code,
+                                )
+                            };
+                            a
+                        })
+                        .collect::<Vec<_>>();
+                    let res: Option<ConscriboResult<Vec<TransactionResult>>> =
+                        foobar.conscribo.run(|c| c.do_multi_request(transactions));
+                    if let Some(res) = res {
+                        match res {
+                            Ok(o) => {
+                                let mut s = String::new();
+                                for r in o {
+                                    s.push_str(&format!("{:?}\n", r));
+                                }
+                                if let Some(se) = ERROR_STUFF.get() {
+                                    se.send(s).unwrap();
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(s) = ERROR_STUFF.get() {
+                                    s.send(format!("Error: {}", e)).unwrap();
+                                }
+                            }
                         }
-                        FileReceiverResult::Waiting => {
-                            ui.label("Waiting for file");
-                        }
-                    };
+                    }
                 }
-            });
-        });
-        TopBottomPanel::bottom(ui.next_auto_id()).show(ui.ctx(), |ui| {
-            if self
-            .turflist
-            .as_ref()
-            .is_some_and(|l| l.iter().any(|r| r.iban.is_some()))
-            {
-                ui.label("The list contains IBANs (aka externals), you need to add these manually to conscribo!");
-            }else {
-                ui.label("");
+            } else {
+                ui.add_enabled_ui(false, |ui| ui.button("Append to Conscribo"));
             }
         });
-        CentralPanel::default().show(ui.ctx(), |ui| {
-            TableBuilder::new(ui)
-                .columns(Column::remainder().at_least(50.0), 5)
-                .header(20.0, |mut r| {
-                    r.col(|ui| {
-                        ui.strong("Name");
-                    });
-                    r.col(|ui| {
-                        ui.strong("Original Name");
-                    });
-                    r.col(|ui| {
-                        ui.strong("Email");
-                    });
-                    r.col(|ui| {
-                        ui.strong("Amount");
-                    });
-                    r.col(|ui| {
-                        ui.strong("IBAN");
-                    });
-                })
-                .body(|mut b| {
-                    let names = members.iter().map(|m| m.naam.clone()).collect::<Vec<_>>();
-                    let emails = members
-                        .iter()
-                        .map(|m| m.email_address.clone())
-                        .collect::<Vec<_>>();
-                    for row in self.turflist.iter().flat_map(|t| t.iter()) {
-                        let (name, email, amount, member) = 
-                        if let Some((idx, price)) = row.best_idx(&names, &emails) {
-                            let member = &members[idx];
-                            (member.naam.clone(), member.email_address.clone(), price, Some(member))
-                        } else {
-                            (row.name.clone(), row.email.clone().unwrap_or_else(|| String::new()), row.amount, None)
-                        };
-                        
-                        b.row(20.0, |mut r| {
-                            r.col(|ui| {
-                                ui.label({
-                                    let t = RichText::new(&name);
-                                    if member.is_none() {
-                                        t.color(ui.visuals().warn_fg_color)
-                                    } else {
-                                        t
-                                    }
-                                });
-                            });
-                            r.col(|ui| {
-                                ui.label(&row.name);
-                            });
-                            r.col(|ui| {
-                                ui.label(email);
-                            });
-                            r.col(|ui| {
-                                ui.label(amount.to_string());
-                            });
-                            r.col(|ui| {
-                                ui.label(format!("{}", member.is_some()));
-                            });
-                        });
-                    }
+        // });
+        // TopBottomPanel::bottom(ui.next_auto_id()).show(ui.ctx(), |ui| {
+        if self
+            .matched
+            .as_ref()
+            .is_some_and(|l| l.iter().any(|r| r.idx().is_none()))
+        {
+            ui.label("The list contains IBANs (aka externals), you need to add these manually to conscribo!");
+        } else {
+            ui.label("");
+        }
+
+        if let Some(o) = &self.turflist {
+            if self.last_len != members.len() || self.matched.is_none() {
+                println!("{} != {}", self.last_len, members.len());
+                let names = members.iter().map(|m| m.naam.clone()).collect::<Vec<_>>();
+                let emails = members
+                    .iter()
+                    .map(|m| m.email_address.clone())
+                    .collect::<Vec<_>>();
+                self.matched = Some(o.get_matches(&names, &emails));
+                self.last_len = members.len();
+            }
+        }
+        // });
+        // CentralPanel::default().show(ui.ctx(), |ui| {
+        TableBuilder::new(ui)
+            .columns(Column::remainder().at_least(50.0), 5)
+            .header(20.0, |mut r| {
+                r.col(|ui| {
+                    ui.strong("Name");
                 });
-        });
+                r.col(|ui| {
+                    ui.strong("Original Name");
+                });
+                r.col(|ui| {
+                    ui.strong("Email");
+                });
+                r.col(|ui| {
+                    ui.strong("Amount");
+                });
+                r.col(|ui| {
+                    ui.strong("Is Member or IBAN");
+                });
+            })
+            .body(|mut b| {
+                for row in self.matched.iter().flat_map(|l| l.iter()) {
+                    let (name, email, amount, member) = if let Some(idx) = row.idx() {
+                        let member = &members[idx];
+                        (
+                            member.naam.clone(),
+                            if member.email_address.is_empty() {
+                                row.row().email.clone().unwrap_or_else(|| String::new())
+                            } else {
+                                member.email_address.clone()
+                            },
+                            row.amount,
+                            Some(member),
+                        )
+                    } else {
+                        (
+                            row.name.clone(),
+                            row.email.clone().unwrap_or_else(|| String::new()),
+                            row.amount,
+                            None,
+                        )
+                    };
+
+                    b.row(20.0, |mut r| {
+                        r.col(|ui| {
+                            let mut s = name.as_str();
+                            let t = TextEdit::singleline(&mut s);
+                            if member.is_none() {
+                                t.text_color(ui.visuals().warn_fg_color)
+                            } else {
+                                t
+                            }
+                            .show(ui);
+                        });
+                        r.col(|ui| {
+                            ui.label(&row.name);
+                        });
+                        r.col(|ui| {
+                            let mut s = email.as_str();
+                            ui.text_edit_singleline(&mut s);
+                        });
+                        r.col(|ui| {
+                            ui.label(amount.to_string());
+                        });
+                        r.col(|ui| {
+                            if member.is_some() {
+                                ui.label("Member");
+                            } else {
+                                let mut iban = row.iban.as_ref().map(String::as_str).unwrap_or("");
+                                ui.text_edit_singleline(&mut iban);
+                            }
+                        });
+                    });
+                }
+            });
+        // });
     }
 }
 
+#[derive(Clone, Debug)]
+struct RelationTransaction {
+    t: Vec<UnifiedTransaction>,
+    name: String,
+    iban: String,
+    email: String,
+}
+
 #[derive(Clone, Debug, Default)]
-struct DrinkImport {
-    turflist: Option<TurfList>,
-    path: Option<std::path::PathBuf>,
+struct SepaGen {
+    transactions: Option<Vec<RelationTransaction>>,
+}
+
+impl SepaGen {
+    fn ui(&mut self, ui: &mut Ui, foobar: &mut FooBar, members: &[Relation]) {
+        if self.transactions.is_none() {}
+        TableBuilder::new(ui)
+            .columns(Column::remainder(), 2)
+            .header(20.0, |mut r| {
+                r.col(|ui| {
+                    ui.label("Name");
+                });
+                r.col(|ui| {
+                    ui.label("Amount");
+                });
+            })
+            .body(|mut b| {
+                if let Some(t) = &self.transactions {
+                    for t in t {
+                        b.row(20.0, |mut r| {
+                            r.col(|ui| {
+                                ui.label(&t.name);
+                            });
+                            r.col(|ui| {
+                                ui.label(
+                                    &t.t.iter()
+                                        .map(|t| t.cost)
+                                        .fold(Euro::default(), |a, b| a + b)
+                                        .to_string(),
+                                );
+                            });
+                        });
+                    }
+                }
+            });
+    }
 }
 
 struct TabViewer<'a> {
@@ -644,15 +794,22 @@ impl<'a> egui_dock::TabViewer for TabViewer<'a> {
                     ContentThing::TurflistImport(TurflistImport::default()),
                 ));
             }
-            if ui.button("Borrel Import").clicked() {
+            if ui.button("Generate Invoice").clicked() {
                 self.added_nodes
-                    .push((node, ContentThing::DrinkImport(DrinkImport::default())));
+                    .push((node, ContentThing::SepaGen(Default::default())));
             }
         });
     }
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
-        !tab.modified()
+        if !tab.modified() {
+            if let Some(handle) = tab.file_handle() {
+                self.foobar.files.remove_receiver(handle);
+            }
+            true
+        } else {
+            false
+        }
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {

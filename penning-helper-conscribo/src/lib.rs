@@ -127,7 +127,7 @@ impl ConscriboClient {
         start_date: impl Into<Date>,
         end_date: impl Into<Date>,
     ) -> ConscriboResult<Vec<UnifiedTransaction>> {
-        let mensen = self.get_relations("persoon")?;
+        let mensen = self.get_relations("lid")?;
         let onbekend = self.get_relations("onbekend")?;
         let mensen = mensen
             .into_iter()

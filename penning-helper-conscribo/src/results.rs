@@ -294,7 +294,7 @@ impl TryFrom<Transaction> for UnifiedTransaction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnifiedTransaction {
     pub date: Date,
     pub code: u32,
