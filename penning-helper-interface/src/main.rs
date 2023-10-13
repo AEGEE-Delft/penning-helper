@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     fs::File,
+    io::Write,
     ops::{Add, Deref, DerefMut, Index},
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -29,6 +30,7 @@ use penning_helper_turflists::{matched_turflist::MatchedTurflist, turflist::Turf
 use penning_helper_types::{Date, Euro};
 use popup::{ErrorThing, Popup};
 
+use rand::Rng;
 use settings::SettingsWindow;
 
 mod background_requester;
@@ -1195,24 +1197,9 @@ impl SepaGen {
                                 continue;
                             }
                             let total = r.total_cost();
-                            let previous = r.previous_invoices_left(self.last_invoice_date);
-                            let t = UnifiedTransaction::create_new_mock(
-                                self.last_invoice_date,
-                                "Open costs of previous invoice".to_string(),
-                                previous,
-                            );
-                            let to_show = r.all_after(self.last_invoice_date);
-                            let t = std::iter::once(&t)
-                                .chain(to_show)
-                                .map(|t| {
-                                    penning_helper_pdf::SimpleTransaction::new(
-                                        t.cost,
-                                        &t.description,
-                                        t.date,
-                                    )
-                                })
-                                .collect::<Vec<_>>();
-                            let pdf = penning_helper_pdf::create_invoice_pdf(t, &r.name);
+
+                            let pdf = Self::get_pdf(self.last_invoice_date, &r);
+
                             let email_address = if matches!(self.send_mode, SendMode::Test) {
                                 "test@asraphiel.dev"
                             } else {
@@ -1254,13 +1241,16 @@ impl SepaGen {
         });
 
         TableBuilder::new(ui)
-            .columns(Column::remainder(), 2)
+            .columns(Column::remainder(), 3)
             .header(20.0, |mut r| {
                 r.col(|ui| {
                     ui.label("Name");
                 });
                 r.col(|ui| {
                     ui.label("Amount");
+                });
+                r.col(|ui| {
+                    ui.label("Get PDF");
                 });
             })
             .body(|mut b| {
@@ -1276,6 +1266,22 @@ impl SepaGen {
                         r.col(|ui| {
                             ui.label(amount.to_string());
                         });
+                        r.col(|ui| {
+                            if ui.button("Open PDF").clicked() {
+                                let pdf = Self::get_pdf(self.last_invoice_date, t);
+                                let mut temp_file = std::env::temp_dir();
+                                let mut rng = rand::thread_rng();
+                                let random_name: String = std::iter::repeat(())
+                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
+                                    .take(10)
+                                    .collect();
+                                temp_file.push(random_name);
+                                temp_file.set_extension("pdf");
+                                let mut f = File::create(&temp_file).unwrap();
+                                f.write_all(&pdf).unwrap();
+                                open::that_detached(temp_file).unwrap();
+                            }
+                        });
                     });
                 }
                 for t in self.too_high_transactions.iter() {
@@ -1290,6 +1296,22 @@ impl SepaGen {
                                 .color(ui.visuals().warn_fg_color);
 
                             ui.label(text);
+                        });
+                        r.col(|ui| {
+                            if ui.button("Open PDF").clicked() {
+                                let pdf = Self::get_pdf(self.last_invoice_date, t);
+                                let mut temp_file = std::env::temp_dir();
+                                let mut rng = rand::thread_rng();
+                                let random_name: String = std::iter::repeat(())
+                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
+                                    .take(10)
+                                    .collect();
+                                temp_file.push(random_name);
+                                temp_file.set_extension("pdf");
+                                let mut f = File::create(&temp_file).unwrap();
+                                f.write_all(&pdf).unwrap();
+                                open::that_detached(temp_file).unwrap();
+                            }
                         });
                     });
                 }
@@ -1308,9 +1330,40 @@ impl SepaGen {
 
                             ui.label(text);
                         });
+                        r.col(|ui| {
+                            if ui.button("Open PDF").clicked() {
+                                let pdf = Self::get_pdf(self.last_invoice_date, t);
+                                let mut temp_file = std::env::temp_dir();
+                                let mut rng = rand::thread_rng();
+                                let random_name: String = std::iter::repeat(())
+                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
+                                    .take(10)
+                                    .collect();
+                                temp_file.push(random_name);
+                                temp_file.set_extension("pdf");
+                                let mut f = File::create(&temp_file).unwrap();
+                                f.write_all(&pdf).unwrap();
+                                open::that_detached(temp_file).unwrap();
+                            }
+                        });
                     });
                 }
             });
+    }
+
+    fn get_pdf(last_invoice_date: Date, r: &RelationTransaction) -> Vec<u8> {
+        let previous = r.previous_invoices_left(last_invoice_date);
+        let t = UnifiedTransaction::create_new_mock(
+            last_invoice_date,
+            "Open costs of previous invoice".to_string(),
+            previous,
+        );
+        let to_show = r.all_after(last_invoice_date);
+        let t = std::iter::once(&t)
+            .chain(to_show)
+            .map(|t| penning_helper_pdf::SimpleTransaction::new(t.cost, &t.description, t.date))
+            .collect::<Vec<_>>();
+        penning_helper_pdf::create_invoice_pdf(t, &r.name)
     }
 }
 

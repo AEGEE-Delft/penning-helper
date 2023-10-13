@@ -85,7 +85,7 @@ pub fn create_invoice_pdf(transactions: Vec<SimpleTransaction>, name: &str) -> V
     let total = transactions.iter().map(|t| t.cost).sum::<Euro>();
     let font = genpdf::fonts::from_files("./fonts", "Roboto", None).unwrap();
     let mut doc = genpdf::Document::new(font);
-    doc.set_title("Gamers");
+    doc.set_title("AEGEE-Delft Invoice");
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_header(|h| {
         genpdf::elements::Paragraph::new(StyledString::new(

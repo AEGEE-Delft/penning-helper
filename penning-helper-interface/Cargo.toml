@@ -22,3 +22,4 @@ open = "5.0.0"
 penning-helper-sepa = { path = "../penning-helper-sepa" }
 penning-helper-mail = { path = "../penning-helper-mail" }
 chrono = "0.4.31"
+rand = "0.8.5"
