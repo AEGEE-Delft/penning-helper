@@ -23,7 +23,7 @@ struct LoginResult {
     session_id: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConscriboClient {
     client: reqwest::blocking::Client,
     session_id: String,

@@ -10,7 +10,7 @@ use std::{
     ops::{Add, Deref, DerefMut, Index},
     path::PathBuf,
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, Sender, sync_channel, SyncSender},
         OnceLock,
     },
     time::{Duration, Instant, SystemTime},
@@ -140,7 +140,7 @@ impl<'t> FooBar<'t> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct ConscriboConnector {
     client: Option<ConscriboClient>,
     username: String,
