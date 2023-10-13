@@ -8,6 +8,7 @@ use penning_helper_types::{Date, Euro};
 use rand::{thread_rng, Rng};
 use xml::writer::XmlEvent;
 
+#[derive(Debug, Clone, Default)]
 pub struct SEPAConfig {
     pub company_name: String,
     pub company_iban: String,

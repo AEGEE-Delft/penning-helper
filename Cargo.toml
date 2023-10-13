@@ -34,4 +34,5 @@ members = [
     "penning-helper-config",
     "penning-helper-turflists",
     "penning-helper-interface",
+    "penning-helper-pdf",
 ]

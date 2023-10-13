@@ -12,6 +12,7 @@ struct EmailTemplate<'a> {
     name: &'a str,
     amount: Euro,
     date: Date,
+    no_details: bool,
     company_name: &'a str,
     company_iban: &'a str,
 }
@@ -20,6 +21,7 @@ impl<'a> EmailTemplate<'a> {
         name: &'a str,
         amount: Euro,
         date: Date,
+        no_details: bool,
         company_name: &'a str,
         company_iban: &'a str,
     ) -> Self {
@@ -27,6 +29,7 @@ impl<'a> EmailTemplate<'a> {
             name,
             amount,
             date,
+            no_details,
             company_name,
             company_iban,
         }
@@ -38,6 +41,10 @@ mod filters {
 
     pub fn abs_euro(e: &Euro) -> ::askama::Result<String> {
         Ok(format!("{:-}", e))
+    }
+
+    pub fn too_much_result(e: &Euro) -> ::askama::Result<String> {
+        Ok(format!("{:-}", *e - 99.99))
     }
 
     pub fn owes_or_not(e: &Euro) -> ::askama::Result<bool> {
@@ -59,12 +66,24 @@ pub enum MailError {
     MailContentError(#[from] lettre::error::Error),
 }
 
+#[derive(Clone)]
 pub struct MailServer {
     sender: SmtpTransport,
     from: Mailbox,
     reply_to: Mailbox,
     iban: String,
     name: String,
+}
+
+impl std::fmt::Debug for MailServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MailServer")
+            .field("from", &self.from)
+            .field("reply_to", &self.reply_to)
+            .field("iban", &self.iban)
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MailServer {
@@ -94,11 +113,12 @@ impl MailServer {
         pdf_file: Vec<u8>,
         amount: Euro,
         date: Date,
+        no_details: bool,
     ) -> Result<(), MailError> {
-        // let name = name.to_string();
-        let mail_content = EmailTemplate::new(&name, amount, date, &self.name, &self.iban)
-            .render()
-            .unwrap();
+        let mail_content =
+            EmailTemplate::new(&name, amount, date, no_details, &self.name, &self.iban)
+                .render()
+                .unwrap();
         let email = Message::builder()
             .from(self.from.clone())
             .reply_to(self.reply_to.clone())

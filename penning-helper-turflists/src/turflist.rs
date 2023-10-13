@@ -1,7 +1,10 @@
 use penning_helper_types::Euro;
 use textdistance::nstr::damerau_levenshtein;
 
-use crate::{matcher::MatchResult, matched_turflist::{MatchedTurflist, MatchedTurflistRow}};
+use crate::{
+    matched_turflist::{MatchedTurflist, MatchedTurflistRow},
+    matcher::MatchResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct TurfList {
@@ -24,6 +27,7 @@ impl TurfList {
                 .find(|r| r.name == row.name && r.email == row.email)
             {
                 new_row.amount += row.amount;
+                new_row.append_what(row.what);
             } else {
                 new_rows.push(row);
             }
@@ -34,11 +38,7 @@ impl TurfList {
         self.rows = new_rows;
     }
 
-    pub fn get_matches(
-        &self,
-        names: &[String],
-        emails: &[String],
-    ) -> MatchedTurflist {
+    pub fn get_matches(&self, names: &[String], emails: &[String]) -> MatchedTurflist {
         let rows = self
             .rows
             .iter()
@@ -62,6 +62,7 @@ pub struct TurfListRow {
     pub email: Option<String>,
     pub amount: Euro,
     pub iban: Option<String>,
+    pub what: Option<String>,
 }
 
 impl TurfListRow {
@@ -71,6 +72,7 @@ impl TurfListRow {
             email: Some(email),
             amount,
             iban,
+            what: None,
         }
     }
 
@@ -80,7 +82,12 @@ impl TurfListRow {
             email: None,
             amount,
             iban: None,
+            what: None,
         }
+    }
+
+    pub fn set_what(&mut self, what: String) {
+        self.what = Some(what);
     }
 
     pub fn best_match(&self, options: &[String], match_on: MatchOn) -> MatchResult<usize> {
@@ -107,7 +114,7 @@ impl TurfListRow {
         // println!("{}: {} -> {}", target, options[best_match.unwrap()], best_score);
         if best_score > 0.3 {
             // println!("No match found for {}", target);
-            return Err(crate::matcher::MatchError::NoMatch)
+            return Err(crate::matcher::MatchError::NoMatch);
         }
         best_match.ok_or(crate::matcher::MatchError::NoMatch)
     }
@@ -138,6 +145,16 @@ impl TurfListRow {
         let best_idx = self.best_idx(names, emails);
         let idx = best_idx.map(|(idx, _)| idx);
         MatchedTurflistRow::new(idx, self.clone())
+    }
+
+    pub fn append_what(&mut self, other_what: Option<String>) {
+        if let Some(what) = other_what {
+            if let Some(my_what) = &mut self.what {
+                my_what.push_str(&format!(", {}", what));
+            } else {
+                self.what = Some(what);
+            }
+        }
     }
 }
 

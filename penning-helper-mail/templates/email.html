@@ -15,16 +15,21 @@
     <div>
         <p>Dear {{name}},</p>
         {% if amount|owes_or_not %}
-        <p>You owe AEGEE-Delft {{amount|abs_euro}}.</p>
-        {% if amount|too_large %}
-        <p>This amount is too large to automatically deduct. Please transfer it manually to {{company_iban}} under
-            name of {{company_name}}.</p>
+            <p>You owe AEGEE-Delft {{amount|abs_euro}}.</p>
+            {% if no_details %}
+                <p>Since we seem to not have your banking details, please transfer this to {{company_iban}} in name of {{company_name}}.</p>
+            {% else %}
+                {% if amount|too_large %}
+                    <p>This amount is too large to automatically deduct completely.</p>
+                    <p>Instead of deducting the full amount €99.99 will be deducted automatically in the coming days.</p>
+                    <p>Please transfer the remaning {{amount|too_much_result}} to {{company_iban}} in name of {{company_name}}.</p>
+                {% else %}
+                    <p>This amount will be automatically deducted from your bank account in the coming days.</p>
+                {% endif %}
+            {% endif %}
         {% else %}
-        <p>This amount will be automatically deducted from your bank account in the coming days.</p>
-        {% endif %}
-        {% else %}
-        <p>AEGEE-Delft owes you {{amount|abs_euro}}.</p>
-        <p>This amount will be automatically transferred to your bank account in the coming days.</p>
+            <p>AEGEE-Delft owes you {{amount|abs_euro}}.</p>
+            <p>This amount will be automatically transferred to your bank account in the coming days.</p>
         {% endif %}
         <p>Attached is a pdf file containing the costs that were used to calculate the size of the invoice. You can read
             more about what this means at the bottom of the invoice.</p>
@@ -36,8 +41,7 @@
         <p>XLIth Board of AEGEE-Delft 'Wervelwind'</p>
         <p></p>
         <div>
-            <img src="cid:logo"
-                alt="AEGEE-Delft logo" width="200">
+            <img src="cid:logo" alt="AEGEE-Delft logo" width="200">
         </div>
         <div style="font-size: x-small;">
             <p style="color: #711970;">AEGEE-Delft</p>

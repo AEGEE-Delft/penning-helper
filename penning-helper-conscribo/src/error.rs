@@ -11,6 +11,8 @@ pub enum ConscriboError {
     SerdeJsonError(#[from] serde_json::Error),
     #[error("Transaction Convert Error: {0}")]
     TransactionConvertError(#[from] TransactionConvertError),
+    #[error("IO Error: {0}")]
+    IOError(#[from] std::io::Error),
 }
 
 pub type ConscriboResult<T> = Result<T, ConscriboError>;

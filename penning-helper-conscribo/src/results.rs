@@ -1,7 +1,7 @@
-use std::{collections::HashSet, fmt::Display, ops::Deref};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use penning_helper_types::Euro;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, DisplayFromStr, KeyValueMap};
 use thiserror::Error;
 
@@ -160,7 +160,7 @@ pub struct Relation {
     #[serde(default, alias = "bankrekeningnummer")]
     pub rekening: Option<Account>,
     #[serde(default, rename = "membership_started")]
-    pub membership_started: Option<String>,
+    pub membership_started: Option<Date>,
     #[serde(skip)]
     pub source: String,
 }
@@ -221,9 +221,21 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn unify(self) -> Result<UnifiedTransaction, TransactionConvertError> {
+    pub fn unify(self) -> Result<Vec<UnifiedTransaction>, TransactionConvertError> {
         self.try_into()
     }
+}
+
+fn default_account() -> String {
+    "99999".to_string()
+}
+
+fn nullable_account<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_else(default_account))
 }
 
 #[serde_as]
@@ -232,6 +244,7 @@ impl Transaction {
 pub struct TransactionRow {
     #[serde(rename = "$key$")]
     internal_id: String,
+    #[serde(default = "default_account", deserialize_with = "nullable_account")]
     pub account_nr: String,
     pub amount: Euro,
     pub description: String,
@@ -254,43 +267,62 @@ pub enum TransactionConvertError {
     MultipleRelations(Vec<u32>),
 }
 
-impl TryFrom<Transaction> for UnifiedTransaction {
+impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
     type Error = TransactionConvertError;
 
     fn try_from(value: Transaction) -> Result<Self, Self::Error> {
         let description = value.description;
         let date = value.date;
-        let relations: HashSet<u32> = value
-            .transaction_rows
-            .iter()
-            .filter_map(|row| row.relation_nr)
-            .collect();
-        if relations.len() > 1 {
-            return Err(TransactionConvertError::MultipleRelations(
-                relations.into_iter().collect(),
-            ));
-        }
-        let reference = value
-            .transaction_rows
-            .iter()
-            .find_map(|row| row.reference.clone())
-            .unwrap_or_default();
 
-        let cost = value
-            .transaction_rows
-            .iter()
-            .filter(|r| r.account_nr == "1001" || r.account_nr == "1002")
-            .fold(Euro::default(), |acc, row| match row.side {
-                Side::Debet => acc + row.amount,
-                Side::Credit => acc - row.amount,
-            });
-        Ok(Self {
-            date,
-            code: relations.into_iter().next().unwrap_or_default(),
-            description,
-            reference,
-            cost,
-        })
+        let mut rows = HashMap::new();
+
+        for row in &value.transaction_rows {
+            if row.account_nr != "1001" && row.account_nr != "1002" {
+                continue;
+            }
+            if let Some(r) = row.relation_nr {
+                let urow = rows.entry(r).or_insert_with(|| UnifiedTransaction {
+                    date,
+                    code: r,
+                    description: description.clone(),
+                    reference: row.reference.clone().unwrap_or_else(|| "????".to_string()),
+                    cost: Default::default(),
+                });
+                match row.side {
+                    Side::Debet => urow.cost += row.amount,
+                    Side::Credit => urow.cost -= row.amount,
+                }
+            }
+        }
+        // let relations: HashSet<u32> = value
+        //     .transaction_rows
+        //     .iter()
+        //     .filter_map(|row| row.relation_nr)
+        //     .collect();
+        // if relations.len() > 1 {
+        //     println!(
+        //         "Multiple relations in transaction: {:?}",
+        //         value.transaction_nr
+        //     );
+        //     return Err(TransactionConvertError::MultipleRelations(
+        //         relations.into_iter().collect(),
+        //     ));
+        // }
+        // let reference = value
+        //     .transaction_rows
+        //     .iter()
+        //     .find_map(|row| row.reference.clone())
+        //     .unwrap_or_default();
+
+        // let cost = value
+        //     .transaction_rows
+        //     .iter()
+        //     .filter(|r| r.account_nr == "1001" || r.account_nr == "1002")
+        //     .fold(Euro::default(), |acc, row| match row.side {
+        //         Side::Debet => acc + row.amount,
+        //         Side::Credit => acc - row.amount,
+        //     });
+        Ok(rows.into_iter().map(|(_, v)| v).collect())
     }
 }
 
@@ -301,6 +333,18 @@ pub struct UnifiedTransaction {
     pub description: String,
     pub reference: String,
     pub cost: Euro,
+}
+
+impl UnifiedTransaction {
+    pub fn create_new_mock(date: Date, description: String, cost: Euro) -> Self {
+        Self {
+            date,
+            code: 0,
+            description,
+            reference: "????".to_string(),
+            cost,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

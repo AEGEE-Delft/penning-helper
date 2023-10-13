@@ -11,9 +11,14 @@ penning-helper-turflists = { path = "../penning-helper-turflists" }
 penning-helper-types = { path = "../penning-helper-types" }
 rfd = "0.11.4"
 penning-helper-conscribo = { path = "../penning-helper-conscribo" }
-egui_extras = "0.22.0"
+egui_extras = { version = "0.22.0", features = ["datepicker"] }
 egui_dock = "0.6.3"
 penning-helper-config = { path = "../penning-helper-config" }
 egui = { version = "0.22.0" }
 dirs = "5.0.1"
 regex = "1.9.5"
+penning-helper-pdf = { path = "../penning-helper-pdf" }
+open = "5.0.0"
+penning-helper-sepa = { path = "../penning-helper-sepa" }
+penning-helper-mail = { path = "../penning-helper-mail" }
+chrono = "0.4.31"

@@ -1,3 +1,8 @@
+use std::{
+    cell::RefCell,
+    sync::{Arc, RwLock},
+};
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 mod error;
@@ -23,6 +28,8 @@ pub struct ConscriboClient {
     client: reqwest::blocking::Client,
     session_id: String,
     url: String,
+    transactions: Arc<RwLock<Option<Vec<UnifiedTransaction>>>>,
+    getting_transactions: RefCell<bool>,
 }
 
 impl ConscriboClient {
@@ -32,7 +39,10 @@ impl ConscriboClient {
         url: impl ToString,
     ) -> ConscriboResult<Self> {
         let url = url.to_string();
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::ClientBuilder::new()
+            .timeout(None)
+            .build()?;
+
         let login_request =
             LoginRequest::new(username.to_string(), password.to_string()).to_request();
         let res = client
@@ -47,6 +57,8 @@ impl ConscriboClient {
             client,
             session_id: res.session_id,
             url,
+            transactions: Default::default(),
+            getting_transactions: Default::default(),
         })
     }
 
@@ -55,6 +67,13 @@ impl ConscriboClient {
     }
 
     pub fn do_request<A: ToRequest, R: DeserializeOwned>(&self, req: A) -> ConscriboResult<R> {
+        let t = self.do_request_str(req)?;
+
+        let value: RootResult<R> = serde_json::from_str(&t)?;
+        value.to_result()
+    }
+
+    fn do_request_str<A: ToRequest>(&self, req: A) -> ConscriboResult<String> {
         let req = req.to_request();
         // let command = req.get_command();
         let t = self
@@ -65,9 +84,7 @@ impl ConscriboClient {
             .json(&req)
             .send()?
             .text()?;
-
-        let value: RootResult<R> = serde_json::from_str(&t)?;
-        value.to_result()
+        Ok(t)
     }
 
     pub fn do_multi_request<A: ToRequest, R: DeserializeOwned>(
@@ -122,11 +139,13 @@ impl ConscriboClient {
         Ok(res)
     }
 
-    pub fn get_transactions(
-        &self,
-        start_date: impl Into<Date>,
-        end_date: impl Into<Date>,
-    ) -> ConscriboResult<Vec<UnifiedTransaction>> {
+    pub fn get_transactions(&self) -> ConscriboResult<Option<Vec<UnifiedTransaction>>> {
+        let running = { *self.getting_transactions.borrow() };
+        if running {
+            let t = { self.transactions.read().unwrap().clone() };
+            return Ok(t);
+        }
+        *self.getting_transactions.borrow_mut() = true;
         let mensen = self.get_relations("lid")?;
         let onbekend = self.get_relations("onbekend")?;
         let mensen = mensen
@@ -134,21 +153,55 @@ impl ConscriboClient {
             .chain(onbekend.into_iter())
             .collect::<Vec<_>>();
         let codes = mensen.iter().map(|m| m.code.clone()).collect::<Vec<_>>();
-        let req = ListTransactions::new(vec![
-            TransactionFilter::DateStart(start_date.into()),
-            TransactionFilter::DateEnd(end_date.into()),
-            TransactionFilter::relations(codes),
-        ]);
+        let req = ListTransactions::new(vec![TransactionFilter::relations(codes)]);
+        let client = self.client.clone();
+        let sesh = self.session_id.clone();
+        let url = self.url.clone();
+        let req = req.to_request();
+        // let command = req.get_command();
 
-        let transactions: Transactions = self.do_request(req)?;
+        // let r = self.do_request_str(req)?;
+        // let r = include_str!("../../transactions.json");
+        // {
+        //     let mut f = std::fs::File::create("transactions.json")?;
+        //     f.write_all(r.as_bytes())?;
+        // }
 
-        let mut transactions = transactions.into_transactions();
-        transactions.sort_by_key(|t| t.date);
-        let transactions = transactions
-            .into_iter()
-            .map(|t| t.unify())
-            .collect::<Result<Vec<UnifiedTransaction>, TransactionConvertError>>()?;
+        let lock = self.transactions.clone();
+        // let transactions: Transactions = self.do_request(req)?;
+        std::thread::Builder::new()
+            .name("Transaction gatherer 9000".to_string())
+            .spawn(move || {
+                println!("Getting transactions");
+                let r = client
+                    .post(&url)
+                    .header("X-Conscribo-API-Version", VERSION)
+                    .header("X-Conscribo-SessionId", &sesh)
+                    .json(&req)
+                    .send()
+                    .unwrap()
+                    .text()
+                    .unwrap();
+                println!("{}", r);
 
-        Ok(transactions)
+                let value: RootResult<Transactions> = serde_json::from_str(&r).unwrap();
+
+                let transactions = value.to_result().unwrap();
+                println!("Got {} transactions", transactions.len());
+
+                let mut transactions = transactions.into_transactions();
+                transactions.sort_by_key(|t| t.date);
+                let transactions = transactions
+                    .into_iter()
+                    .map(|t| t.unify())
+                    .collect::<Result<Vec<Vec<UnifiedTransaction>>, TransactionConvertError>>()
+                    .unwrap();
+                println!("Converted {} transactions", transactions.len());
+                lock.write()
+                    .unwrap()
+                    .replace(transactions.into_iter().flatten().collect());
+            })?;
+
+        Ok(None)
     }
 }

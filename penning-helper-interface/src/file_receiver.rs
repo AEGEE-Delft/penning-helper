@@ -14,11 +14,15 @@ pub enum FileReceiverSource {
 impl FileReceiverSource {
     pub fn extensions(&self) -> &[(&str, &[&str])] {
         match self {
-            FileReceiverSource::TurfList => &[
-                ("Excel File", &["xlsx", "xls", "xlsm", "xlsb"]),
-                ("CSV", &["csv"]),
-            ],
-            FileReceiverSource::SepaSaveLoc => todo!(),
+            FileReceiverSource::TurfList => &[("Turflist", &["xlsx", "xls", "csv"])],
+            FileReceiverSource::SepaSaveLoc => &[("SEPA", &["xml"])],
+        }
+    }
+
+    pub fn should_save(&self) -> bool {
+        match self {
+            FileReceiverSource::TurfList => false,
+            FileReceiverSource::SepaSaveLoc => true,
         }
     }
 }
@@ -34,8 +38,10 @@ impl FileReceievers {
         println!("Adding new receiver: {:?}", source);
         self.received.remove(&source);
         let extensions = source.extensions();
-        self.receivers
-            .insert(source, FileReceiver::receive_file(extensions));
+        self.receivers.insert(
+            source,
+            FileReceiver::recv_or_save(extensions, source.should_save()),
+        );
     }
 
     pub fn get_receiver(&self, source: FileReceiverSource) -> Option<&FileReceiver> {
@@ -72,10 +78,6 @@ pub enum FileReceiverResult<'p> {
 }
 
 impl FileReceiver {
-    pub fn receive_file(extensions: &[(&str, &[&str])]) -> Self {
-        Self::recv_or_save(extensions, false)
-    }
-
     pub fn recv_or_save(extensions: &[(&str, &[&str])], save: bool) -> Self {
         let (s, receiver) = channel();
         let mut dialog = rfd::FileDialog::new();
@@ -83,10 +85,13 @@ impl FileReceiver {
             dialog = dialog.add_filter(name, exts);
         }
         thread::spawn(move || {
-            if let Some(res) = dialog.pick_file() {
-                s.send(res).unwrap();
+            let r = if save {
+                dialog.save_file()
             } else {
-                drop(s);
+                dialog.pick_file()
+            };
+            if let Some(res) = r {
+                s.send(res).unwrap();
             }
         });
         Self {

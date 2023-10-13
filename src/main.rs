@@ -16,80 +16,106 @@ fn main() {
         toml::from_str(std::fs::read_to_string(".sample.toml").unwrap().as_str()).unwrap();
 
     let client = ConscriboClient::new_from_cfg(config.conscribo()).unwrap();
-    let members = client.get_relations("lid").unwrap();
-    let others = client.get_relations("onbekend").unwrap();
-    let others = others.into_iter().filter(|o| !members.iter().any(|m|m.naam == o.naam)).collect::<Vec<_>>();
-    let all_relations = members
-        .into_iter()
-        .chain(others.into_iter())
-        // .filter(|r| r.naam == "Julius de Jeu")
-        .collect::<Vec<_>>();
-    // let f = std::fs::File::open("borrel.csv").unwrap();
-    // let mut turf_list = penning_helper_turflists::csv::read_csv(f).unwrap();
-    let mut turf_list = penning_helper_turflists::xlsx::read_excel("intro.xlsx", 420.0.into()).unwrap();
-    turf_list.shrink();
-    let names = all_relations
-        .iter()
-        .map(|r| r.naam.clone())
-        .collect::<Vec<_>>();
-    let emails = all_relations
-        .iter()
-        .map(|r| r.email_address.clone())
-        .collect::<Vec<_>>();
-    let mut no_matches: HashMap<String, Euro> = HashMap::new();
-    for entry in turf_list.iter() {
-        // println!("{:#?}", entry);
-        if entry.iban.is_some() {
-            println!("{} already has an iban", entry.name);
-            continue;
-        }
-        let Some((idx, _)) = entry.best_idx(&names, &emails) else {
-            println!("{} has no match", entry.name);
-            *no_matches.entry(entry.name.to_string()).or_default()+= entry.amount;
-            continue;
-        };
+    // let members = client.get_relations("lid").unwrap();
+    // let others = client.get_relations("onbekend").unwrap();
+    // let others = others.into_iter().filter(|o| !members.iter().any(|m|m.naam == o.naam)).collect::<Vec<_>>();
+    // let all_relations = members
+    //     .into_iter()
+    //     .chain(others.into_iter())
+    //     // .filter(|r| r.naam == "Julius de Jeu")
+    //     .collect::<Vec<_>>();
+    // // let f = std::fs::File::open("borrel.csv").unwrap();
+    // // let mut turf_list = penning_helper_turflists::csv::read_csv(f).unwrap();
+    // let mut turf_list = penning_helper_turflists::xlsx::read_excel("intro.xlsx", 420.0.into()).unwrap();
+    // turf_list.shrink();
+    // let names = all_relations
+    //     .iter()
+    //     .map(|r| r.naam.clone())
+    //     .collect::<Vec<_>>();
+    // let emails = all_relations
+    //     .iter()
+    //     .map(|r| r.email_address.clone())
+    //     .collect::<Vec<_>>();
+    // let mut no_matches: HashMap<String, Euro> = HashMap::new();
+    // for entry in turf_list.iter() {
+    //     // println!("{:#?}", entry);
+    //     if entry.iban.is_some() {
+    //         println!("{} already has an iban", entry.name);
+    //         continue;
+    //     }
+    //     let Some((idx, _)) = entry.best_idx(&names, &emails) else {
+    //         println!("{} has no match", entry.name);
+    //         *no_matches.entry(entry.name.to_string()).or_default()+= entry.amount;
+    //         continue;
+    //     };
         
-        println!(
-            "matched {} to {} ({} spent) (source {})",
-            entry.name, all_relations[idx].naam, entry.amount, all_relations[idx].source
-        );
-    }
-    let matches = turf_list
-        .iter()
-        .flat_map(|t| t.best_idx(&names, &emails))
-        .map(|(idx, amount)| (&all_relations[idx], amount))
-        .collect::<Vec<_>>();
-    let transactions = matches
-        .iter()
-        .map(|(r, eur)| {
-            let eur = *eur;
-            let a = AddChangeTransaction::new(
-                Date::today(),
-                "Introweekend".to_string(),
-            );
-            let a = if eur > Euro::default() {
-                a.add_debet("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
-            } else if eur < Euro::default() {
-                a.add_credit("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
-            } else {
-                a
-            };
-            // println!("{:#?}", a);
-            // println!("{}", serde_json::to_string_pretty(&a).unwrap());
-            a
-        })
-        .collect::<Vec<_>>();
-    // let message = ConscriboMultiRequest::new(transactions);
-    println!("{:#?}", transactions);
-    // let res: MultiRootResult<TransactionResult> = client.do_multi_request(transactions).unwrap();
-    // let transactions = include_str!("../transactions.json");
-    // let res: ConscriboResult<_> = serde_json::from_str::<MultiRootResult<TransactionResult>>(transactions).unwrap().into();
+    //     println!(
+    //         "matched {} to {} ({} spent) (source {})",
+    //         entry.name, all_relations[idx].naam, entry.amount, all_relations[idx].source
+    //     );
+    // }
+    // let matches = turf_list
+    //     .iter()
+    //     .flat_map(|t| t.best_idx(&names, &emails))
+    //     .map(|(idx, amount)| (&all_relations[idx], amount))
+    //     .collect::<Vec<_>>();
+    // let transactions = matches
+    //     .iter()
+    //     .map(|(r, eur)| {
+    //         let eur = *eur;
+    //         let a = AddChangeTransaction::new(
+    //             Date::today(),
+    //             "Introweekend".to_string(),
+    //         );
+    //         let a = if eur > Euro::default() {
+    //             a.add_debet("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
+    //         } else if eur < Euro::default() {
+    //             a.add_credit("6022-01".to_string(), eur, "T2324-03".to_string(), r.code)
+    //         } else {
+    //             a
+    //         };
+    //         // println!("{:#?}", a);
+    //         // println!("{}", serde_json::to_string_pretty(&a).unwrap());
+    //         a
+    //     })
+    //     .collect::<Vec<_>>();
+    // // let message = ConscriboMultiRequest::new(transactions);
+    // println!("{:#?}", transactions);
+    // // let res: MultiRootResult<TransactionResult> = client.do_multi_request(transactions).unwrap();
+    // // let transactions = include_str!("../transactions.json");
+    // // let res: ConscriboResult<_> = serde_json::from_str::<MultiRootResult<TransactionResult>>(transactions).unwrap().into();
 
-    // println!("{:#?}", res);
-    println!("Could not find the following people:");
-    for (name, amount) in no_matches {
-        println!("{}: {}", name, amount);
+    // // println!("{:#?}", res);
+    // println!("Could not find the following people:");
+    // for (name, amount) in no_matches {
+    //     println!("{}: {}", name, amount);
+    // }
+
+
+    let mut transactions = client
+        .get_transactions()
+        .unwrap();
+
+    while matches!(transactions, None) {
+        println!("Waiting for transactions to be available");
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        transactions = client
+            .get_transactions()
+            .unwrap();
     }
+    let transactions = transactions.unwrap();
+    let t2 = transactions.iter().filter(|t| t.code == 1016).collect::<Vec<_>>();
+    let total = t2.iter().map(|t| t.cost).sum::<Euro>();
+    let transactions_from = t2.iter().filter(|t| t.date >= Date::new(2023, 09, 01).unwrap()).collect::<Vec<_>>();
+    let total_from = transactions_from.iter().map(|t| t.cost).sum::<Euro>();
+
+    println!("You still had {} left from previous invoices", total - total_from);
+    for t in &transactions_from {
+        println!("{}: {}", t.description, t.cost);
+    }
+    println!("total: {}", total);
+
+    
 
 }
 
@@ -119,8 +145,8 @@ fn stuff(cfg: &penning_helper_config::ConscriboConfig) -> (Euro, Vec<u8>) {
     }
 
     let transactions = client
-        .get_transactions(Date::new(2022, 9, 1), Date::new(2099, 12, 31))
-        .unwrap();
+        .get_transactions()
+        .unwrap().unwrap();
 
     let transactions = transactions
         .into_iter()
@@ -217,7 +243,7 @@ fn create_pdf(transactions: Vec<UnifiedTransaction>, name: &str) -> Vec<u8> {
     } else if total > Euro::default() {
         format!("You owe AEGEE-Delft {:-}, it will be deducted in about 3 days. If this is wrong please send an email to treasurer@aegee-delft.nl!", total)
     } else {
-        format!("AEGEE-Delft owes you {:-}, it will be transferred in about 3 days. If this is wrong please send an email to treasurer@aegee-delft.nl!", total)
+        format!("AEGEE-Delft owes you {:-}, it will be transferred in about 6 days. If this is wrong please send an email to treasurer@aegee-delft.nl!", total)
     };
 
     doc.push(genpdf::elements::Paragraph::new(text).padded((1, 1, 5, 1)));
@@ -650,3 +676,4 @@ fn contract_generator(
     doc.render(&mut buf).unwrap();
     buf
 }
+

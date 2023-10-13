@@ -26,7 +26,14 @@ impl Document {
         DocumentString::from(self)
     }
 
-    pub fn write<W: Write>(self, writer: &mut EventWriter<W>) -> xml::writer::Result<()> {
+    pub fn write<W: Write>(self, writer: W) -> xml::writer::Result<()> {
+        let mut writer = EventWriter::new(writer);
+        self.write_xml(&mut writer)?;
+        writer.inner_mut().flush()?;
+        Ok(())
+    }
+
+    fn write_xml<W: Write>(self, writer: &mut EventWriter<W>) -> xml::writer::Result<()> {
         let doc = self.to_xml_doc();
         let xml = doc.to_xml();
         for event in xml {
