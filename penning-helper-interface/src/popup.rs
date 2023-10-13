@@ -3,6 +3,8 @@ use std::any::Any;
 use egui::{vec2, Align2, Key, TextEdit, Ui, Window};
 use regex::Regex;
 
+static ID_GEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub struct Popup {
     open: bool,
     title: String,
@@ -40,6 +42,7 @@ impl Popup {
     pub fn show(&mut self, ctx: &egui::Context) {
         let mut open = self.open;
         let r = Window::new(&self.title)
+            .id(egui::Id::new(ID_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
             .open(&mut open)
             .anchor(Align2::CENTER_CENTER, (0.0, 0.0))
             .default_size(vec2(512.0, 512.0))

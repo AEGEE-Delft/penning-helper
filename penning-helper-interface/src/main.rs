@@ -848,10 +848,6 @@ impl RelationTransaction {
         self.t.iter().filter(move |t| t.date >= date)
     }
 
-    pub fn cost_after(&self, date: Date) -> Euro {
-        self.all_after(date).map(|t| t.cost).sum()
-    }
-
     pub fn previous_invoices_left(&self, date: Date) -> Euro {
         self.t
             .iter()
@@ -1018,6 +1014,10 @@ impl SepaGen {
             let mut big_money = vec![];
             for t in self.transactions.clone() {
                 if t.total_cost() == Euro::default() {
+                    continue;
+                }
+                if t.email.is_empty() {
+                    println!("No email for {}", t.name);
                     continue;
                 }
                 if t.bic.is_empty() || t.iban.is_empty() {
@@ -1190,6 +1190,10 @@ impl SepaGen {
                         println!("Sending emails");
                         let today = Date::today();
                         for r in self.to_send.drain(0..(20.min(self.to_send.len()))) {
+                            if r.email.is_empty() {
+                                println!("No email for {}", r.name);
+                                continue;
+                            }
                             let total = r.total_cost();
                             let previous = r.previous_invoices_left(self.last_invoice_date);
                             let t = UnifiedTransaction::create_new_mock(
@@ -1218,17 +1222,21 @@ impl SepaGen {
                                 "Sending email for {} to {}, with total {}",
                                 r.name, email_address, total
                             );
-                            mail_client
-                                .send_mail(
-                                    &r.name,
-                                    email_address,
-                                    pdf,
-                                    total,
-                                    today,
-                                    r.iban.is_empty() || r.bic.is_empty(),
-                                )
-                                .unwrap();
+                            if let Err(e) = mail_client.send_mail(
+                                &r.name,
+                                email_address,
+                                pdf,
+                                total,
+                                today,
+                                r.iban.is_empty() || r.bic.is_empty(),
+                            ) {
+                                if let Some(s) = ERROR_STUFF.get() {
+                                    s.send(format!("Error sending mail: {}", e)).unwrap();
+                                }
+                            }
                         }
+                        ui.ctx().request_repaint_after(Duration::from_secs(1));
+                        self.last_send = TimeThing::now();
                     } else {
                         ui.label(format!(
                             "Waiting, {} emails remaining, {} time remaning",
