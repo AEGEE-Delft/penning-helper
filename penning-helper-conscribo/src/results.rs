@@ -277,6 +277,7 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
         let mut rows = HashMap::new();
 
         for row in &value.transaction_rows {
+            println!("{:?}", row);
             if row.account_nr != "1001" && row.account_nr != "1002" {
                 continue;
             }
