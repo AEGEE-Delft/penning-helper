@@ -1,15 +1,11 @@
-use std::path::PathBuf;
-
 use genpdf::{
-    elements::{FrameCellDecorator, LinearLayout, PaddedElement},
+    elements::{LinearLayout, PaddedElement},
     fonts::{FontData, FontFamily},
     style::StyledString,
     Element, Margins,
 };
 use once_cell::sync::Lazy;
-use penning_helper_turflists::turflist::TurfListRow;
 use penning_helper_types::{Date, Euro};
-use rand::Rng;
 
 mod turflist;
 

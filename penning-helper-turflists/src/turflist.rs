@@ -112,7 +112,7 @@ impl TurfListRow {
             }
         }
         // println!("{}: {} -> {}", target, options[best_match.unwrap()], best_score);
-        if best_score > 0.3 {
+        if best_score > 0.1 {
             // println!("No match found for {}", target);
             return Err(crate::matcher::MatchError::NoMatch);
         }
