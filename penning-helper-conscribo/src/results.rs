@@ -163,7 +163,11 @@ pub struct Relation {
     pub membership_started: Option<Date>,
     #[serde(skip)]
     pub source: String,
+    #[serde_as(as = "serde_with::BoolFromInt")]
+    #[serde(default, alias = "geen_invoice")]
+    pub no_invoice: bool,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

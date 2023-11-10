@@ -68,7 +68,7 @@ impl ConscriboClient {
 
     pub fn do_request<A: ToRequest, R: DeserializeOwned>(&self, req: A) -> ConscriboResult<R> {
         let t = self.do_request_str(req)?;
-
+        // println!("{}", t);
         let value: RootResult<R> = serde_json::from_str(&t)?;
         value.to_result()
     }
@@ -100,7 +100,7 @@ impl ConscriboClient {
             .json(&multi_req)
             .send()?
             .text()?;
-        println!("{}", t);
+        // println!("{}", t);
         let value: MultiRootResult<R> = serde_json::from_str(&t)?;
         value.into()
     }
@@ -129,6 +129,7 @@ impl ConscriboClient {
                 "email".to_string(),
                 "rekening".to_string(),
                 "membership_started".to_string(),
+                "geen_invoice".to_string(),
             ],
         );
         let res: Relations = self.do_request(req)?;

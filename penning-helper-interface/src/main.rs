@@ -184,8 +184,12 @@ impl ConscriboConnector {
                 }
             }
         };
-        if self.client.is_some() {
+        if let Some(c) = &self.client {
             println!("Connected to Conscribo");
+            let _fields = c.get_field_definitions("lid");
+            // if let Ok(fields) = fields {
+            //     println!("Fields: {:?}", fields);
+            // }
             return true;
         }
         self.n += 1;
@@ -976,6 +980,9 @@ impl SepaGen {
                     println!("No relation found for {}", t.code);
                     continue;
                 };
+                if rel.no_invoice {
+                    continue;
+                }
                 let name = rel.naam.as_str();
                 let iban = rel
                     .rekening
