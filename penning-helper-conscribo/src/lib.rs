@@ -1,5 +1,7 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
+    path::Path,
     sync::{Arc, RwLock},
 };
 
@@ -140,12 +142,23 @@ impl ConscriboClient {
         Ok(res)
     }
 
-    pub fn get_transactions(&self) -> ConscriboResult<Option<Vec<UnifiedTransaction>>> {
+    pub fn get_transactions(
+        &self,
+        cache_path: &Path,
+    ) -> ConscriboResult<Option<Vec<UnifiedTransaction>>> {
         let running = { *self.getting_transactions.borrow() };
         if running {
             let t = { self.transactions.read().unwrap().clone() };
             return Ok(t);
         }
+        let cache_path = cache_path.to_path_buf();
+        let cache = if let Ok(mut f) = std::fs::File::open(&cache_path) {
+            let cache: Cache = serde_json::from_reader(&mut f)?;
+
+            cache
+        } else {
+            Cache::default()
+        };
         *self.getting_transactions.borrow_mut() = true;
         let mensen = self.get_relations("lid")?;
         let onbekend = self.get_relations("onbekend")?;
@@ -154,25 +167,21 @@ impl ConscriboClient {
             .chain(onbekend.into_iter())
             .collect::<Vec<_>>();
         let codes = mensen.iter().map(|m| m.code.clone()).collect::<Vec<_>>();
-        let req = ListTransactions::new(vec![TransactionFilter::relations(codes)]);
+        let req = ListTransactions::new(vec![
+            TransactionFilter::relations(codes),
+            TransactionFilter::DateStart(cache.last_date),
+        ]);
         let client = self.client.clone();
         let sesh = self.session_id.clone();
         let url = self.url.clone();
         let req = req.to_request();
-        // let command = req.get_command();
-
-        // let r = self.do_request_str(req)?;
-        // let r = include_str!("../../transactions.json");
-        // {
-        //     let mut f = std::fs::File::create("transactions.json")?;
-        //     f.write_all(r.as_bytes())?;
-        // }
 
         let lock = self.transactions.clone();
-        // let transactions: Transactions = self.do_request(req)?;
+
         std::thread::Builder::new()
             .name("Transaction gatherer 9000".to_string())
             .spawn(move || {
+                let cache = cache;
                 println!("Getting transactions");
                 let r = client
                     .post(&url)
@@ -195,14 +204,45 @@ impl ConscriboClient {
                 let transactions = transactions
                     .into_iter()
                     .map(|t| t.unify())
-                    .collect::<Result<Vec<Vec<UnifiedTransaction>>, TransactionConvertError>>()
+                    .collect::<Result<Vec<_>, _>>()
                     .unwrap();
+                let mut transactions: HashSet<UnifiedTransaction> =
+                    transactions.into_iter().flatten().collect();
+                transactions.extend(cache.transactions.into_iter());
+                // remove duplicates from transactions
+                println!("Got {} transactions", transactions.len());
+
+                let cache = Cache {
+                    last_date: transactions
+                        .iter()
+                        .map(|t| t.date)
+                        .max()
+                        .unwrap_or(Date::today()),
+                    transactions: transactions.iter().cloned().collect(),
+                };
+                let mut f = std::fs::File::create(cache_path).unwrap();
+                serde_json::to_writer(&mut f, &cache).unwrap();
                 println!("Converted {} transactions", transactions.len());
                 lock.write()
                     .unwrap()
-                    .replace(transactions.into_iter().flatten().collect());
+                    .replace(transactions.into_iter().collect::<Vec<_>>());
             })?;
 
         Ok(None)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Cache {
+    last_date: Date,
+    transactions: Vec<UnifiedTransaction>,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            last_date: Date::new(2020, 01, 01).unwrap(),
+            transactions: Default::default(),
+        }
     }
 }

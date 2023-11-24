@@ -1,9 +1,12 @@
-use std::{fmt::Display, ops::{Deref, DerefMut}};
+use std::{
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
 use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Date {
     date: NaiveDate,
 }
@@ -43,6 +46,12 @@ impl Date {
         let res = now.checked_add_days(Days::new(days)).unwrap();
         Self {
             date: res.date_naive(),
+        }
+    }
+
+    pub fn add_days(self, days: u64) -> Self {
+        Self {
+            date: self.date.checked_add_days(Days::new(days)).unwrap(),
         }
     }
 }

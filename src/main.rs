@@ -92,72 +92,73 @@ fn main() {
     // }
 
 
-    let mut transactions = client
-        .get_transactions()
-        .unwrap();
+    // let mut transactions = client
+    //     .get_transactions()
+    //     .unwrap();
 
-    while matches!(transactions, None) {
-        println!("Waiting for transactions to be available");
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        transactions = client
-            .get_transactions()
-            .unwrap();
-    }
-    let transactions = transactions.unwrap();
-    let t2 = transactions.iter().filter(|t| t.code == 1016).collect::<Vec<_>>();
-    let total = t2.iter().map(|t| t.cost).sum::<Euro>();
-    let transactions_from = t2.iter().filter(|t| t.date >= Date::new(2023, 09, 01).unwrap()).collect::<Vec<_>>();
-    let total_from = transactions_from.iter().map(|t| t.cost).sum::<Euro>();
+    // while matches!(transactions, None) {
+    //     println!("Waiting for transactions to be available");
+    //     std::thread::sleep(std::time::Duration::from_secs(5));
+    //     transactions = client
+    //         .get_transactions()
+    //         .unwrap();
+    // }
+    // let transactions = transactions.unwrap();
+    // let t2 = transactions.iter().filter(|t| t.code == 1016).collect::<Vec<_>>();
+    // let total = t2.iter().map(|t| t.cost).sum::<Euro>();
+    // let transactions_from = t2.iter().filter(|t| t.date >= Date::new(2023, 09, 01).unwrap()).collect::<Vec<_>>();
+    // let total_from = transactions_from.iter().map(|t| t.cost).sum::<Euro>();
 
-    println!("You still had {} left from previous invoices", total - total_from);
-    for t in &transactions_from {
-        println!("{}: {}", t.description, t.cost);
-    }
-    println!("total: {}", total);
+    // println!("You still had {} left from previous invoices", total - total_from);
+    // for t in &transactions_from {
+    //     println!("{}: {}", t.description, t.cost);
+    // }
+    // println!("total: {}", total);
 
-    
+    let l = penning_helper_turflists::csv::read_csv("/home/jdejeu/Downloads/balansen_export_2023-11-22.csv");
+    println!("{:#?}", l);
 
 }
 
-fn stuff(cfg: &penning_helper_config::ConscriboConfig) -> (Euro, Vec<u8>) {
-    let client = ConscriboClient::new_from_cfg(cfg).unwrap();
-    // println!("{:?}", client);
-    // let res = client.get_field_definitions("persoon").unwrap();
-    // println!("{:#?}", res);
-    let members = client.get_relations("persoon").unwrap();
-    let me = members
-        .iter()
-        .find(|m| m.naam == "Julius de Jeu")
-        .unwrap()
-        .clone();
-    println!("{:#?}", me);
-    let unknowns = client.get_relations("onbekend").unwrap();
-    let all_relations = members
-        .into_iter()
-        .chain(unknowns.into_iter())
-        .collect::<Vec<_>>();
-    let all_relations_no_bank = all_relations
-        .iter()
-        .filter(|r| r.rekening.is_none())
-        .collect::<Vec<_>>();
-    for relation in all_relations_no_bank {
-        println!("{}", relation.naam);
-    }
+// fn stuff(cfg: &penning_helper_config::ConscriboConfig) -> (Euro, Vec<u8>) {
+//     let client = ConscriboClient::new_from_cfg(cfg).unwrap();
+//     // println!("{:?}", client);
+//     // let res = client.get_field_definitions("persoon").unwrap();
+//     // println!("{:#?}", res);
+//     let members = client.get_relations("persoon").unwrap();
+//     let me = members
+//         .iter()
+//         .find(|m| m.naam == "Julius de Jeu")
+//         .unwrap()
+//         .clone();
+//     println!("{:#?}", me);
+//     let unknowns = client.get_relations("onbekend").unwrap();
+//     let all_relations = members
+//         .into_iter()
+//         .chain(unknowns.into_iter())
+//         .collect::<Vec<_>>();
+//     let all_relations_no_bank = all_relations
+//         .iter()
+//         .filter(|r| r.rekening.is_none())
+//         .collect::<Vec<_>>();
+//     for relation in all_relations_no_bank {
+//         println!("{}", relation.naam);
+//     }
 
-    let transactions = client
-        .get_transactions()
-        .unwrap().unwrap();
+//     let transactions = client
+//         .get_transactions()
+//         .unwrap().unwrap();
 
-    let transactions = transactions
-        .into_iter()
-        .filter(|t| t.code == me.code)
-        .collect::<Vec<_>>();
-    // println!("{:#?}", transactions);
-    let r = transactions.iter().map(|t| t.cost).sum::<Euro>();
-    println!("{}", r);
-    // penning_helper_sepa::gen_xml();
-    (r, create_pdf(transactions, &me.naam))
-}
+//     let transactions = transactions
+//         .into_iter()
+//         .filter(|t| t.code == me.code)
+//         .collect::<Vec<_>>();
+//     // println!("{:#?}", transactions);
+//     let r = transactions.iter().map(|t| t.cost).sum::<Euro>();
+//     println!("{}", r);
+//     // penning_helper_sepa::gen_xml();
+//     (r, create_pdf(transactions, &me.naam))
+// }
 
 trait SmallPad: Sized + Element {
     fn wrap_small_pad(self) -> PaddedElement<Self>

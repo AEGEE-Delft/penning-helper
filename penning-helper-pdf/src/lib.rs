@@ -92,7 +92,8 @@ pub fn create_invoice_pdf(transactions: Vec<SimpleTransaction>, name: &str) -> V
     });
     decorator.set_margins(20);
     doc.set_page_decorator(decorator);
-    let image = image::open("logo.png").unwrap();
+    let logo = include_bytes!("../../penning-helper-mail/logo.png");
+    let image = image::load_from_memory(logo).unwrap();
     let image = image.to_rgb8();
     let w = image.width();
     let max_w = 500;

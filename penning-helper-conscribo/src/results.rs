@@ -168,7 +168,6 @@ pub struct Relation {
     pub no_invoice: bool,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
@@ -287,6 +286,14 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
             }
             if let Some(r) = row.relation_nr {
                 let urow = rows.entry(r).or_insert_with(|| UnifiedTransaction {
+                    unique_id: format!(
+                        "{}-{}-{}-{}-{}",
+                        row.reference.as_ref().map(String::as_str).unwrap_or("????"),
+                        r,
+                        row.amount,
+                        row.description,
+                        row.account_nr,
+                    ),
                     date,
                     code: r,
                     description: description.clone(),
@@ -299,40 +306,13 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
                 }
             }
         }
-        // let relations: HashSet<u32> = value
-        //     .transaction_rows
-        //     .iter()
-        //     .filter_map(|row| row.relation_nr)
-        //     .collect();
-        // if relations.len() > 1 {
-        //     println!(
-        //         "Multiple relations in transaction: {:?}",
-        //         value.transaction_nr
-        //     );
-        //     return Err(TransactionConvertError::MultipleRelations(
-        //         relations.into_iter().collect(),
-        //     ));
-        // }
-        // let reference = value
-        //     .transaction_rows
-        //     .iter()
-        //     .find_map(|row| row.reference.clone())
-        //     .unwrap_or_default();
-
-        // let cost = value
-        //     .transaction_rows
-        //     .iter()
-        //     .filter(|r| r.account_nr == "1001" || r.account_nr == "1002")
-        //     .fold(Euro::default(), |acc, row| match row.side {
-        //         Side::Debet => acc + row.amount,
-        //         Side::Credit => acc - row.amount,
-        //     });
         Ok(rows.into_iter().map(|(_, v)| v).collect())
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct UnifiedTransaction {
+    pub unique_id: String,
     pub date: Date,
     pub code: u32,
     pub description: String,
@@ -343,6 +323,7 @@ pub struct UnifiedTransaction {
 impl UnifiedTransaction {
     pub fn create_new_mock(date: Date, description: String, cost: Euro) -> Self {
         Self {
+            unique_id: "mock".to_string(),
             date,
             code: 0,
             description,

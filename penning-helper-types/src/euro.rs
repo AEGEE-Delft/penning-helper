@@ -2,7 +2,7 @@ use std::{
     fmt::{Debug, Display},
     iter::Sum,
     ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign},
-    str::FromStr,
+    str::FromStr, hash::Hash,
 };
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,12 @@ impl Euro {
     fn round(mut self) -> Self {
         self.0 = (self.0 * 100.0).round() / 100.0;
         self
+    }
+}
+
+impl Hash for Euro {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state)
     }
 }
 
@@ -70,6 +76,19 @@ impl From<i32> for Euro {
         Euro::new(value, 0).round()
     }
 }
+
+macro_rules! from_integer_type {
+    ($($t:ty),* $(,)?) => {
+        $(impl From<$t> for Euro {
+            fn from(value: $t) -> Self {
+                Euro::new(value as i32, 0).round()
+            }
+        })*
+    };
+}
+
+from_integer_type!(i8, i16, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 
 impl Debug for Euro {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -8,6 +8,7 @@ use std::{
     fs::File,
     io::Write,
     ops::{Add, Deref, DerefMut, Index},
+    path::PathBuf,
     sync::{
         mpsc::{channel, Receiver, Sender},
         OnceLock,
@@ -564,7 +565,7 @@ impl TurflistImport {
                 self.price = Default::default();
             };
             if let Some(list) = foobar.files.get_receiver(FileReceiverSource::TurfList) {
-                println!("Receiver exists!");
+                // println!("Receiver exists!");
                 match list.get_file() {
                     FileReceiverResult::File(f) => {
                         ui.label(format!("File: {:?}", f));
@@ -574,19 +575,12 @@ impl TurflistImport {
                             match ext {
                                 "csv" => {
                                     ui.label("csv");
-                                    match File::open(f) {
-                                        Ok(f) => match penning_helper_turflists::csv::read_csv(f) {
-                                            Ok(mut l) => {
-                                                l.shrink();
-                                                self.turflist = Some(l);
-                                                self.matched = None;
-                                            }
-                                            Err(e) => {
-                                                if let Some(s) = ERROR_STUFF.get() {
-                                                    s.send(e.to_string()).unwrap();
-                                                }
-                                            }
-                                        },
+                                    match penning_helper_turflists::csv::read_csv(f) {
+                                        Ok(mut l) => {
+                                            l.shrink();
+                                            self.turflist = Some(l);
+                                            self.matched = None;
+                                        }
                                         Err(e) => {
                                             if let Some(s) = ERROR_STUFF.get() {
                                                 s.send(e.to_string()).unwrap();
@@ -948,11 +942,18 @@ impl SepaGen {
         }
         let done = if !self.unifieds_grabbed {
             ui.label(format!("Getting transactions{}", ".".repeat(self.idx / 50)));
+            ui.label("This will take a while the first time");
             self.idx += 1;
             self.idx %= 200;
+
+            let cache_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
+            let cache_dir = cache_dir.join("penning-helper");
+            std::fs::create_dir_all(&cache_dir).unwrap();
+            let cache = cache_dir.join("cache.json");
+
             let r = foobar
                 .conscribo
-                .run(|c| c.get_transactions())
+                .run(|c| c.get_transactions(&cache))
                 .transpose()
                 .map(Option::flatten);
             ui.ctx().request_repaint();
@@ -973,9 +974,9 @@ impl SepaGen {
         } else if !self.unifieds.is_empty() {
             ui.label("Calculating, numbers will change for a bit");
             ui.ctx().request_repaint();
-            for _ in 0..min(self.unifieds.len(), 10) {
+            for _ in 0..min(self.unifieds.len(), 1000) {
                 let t = self.unifieds.remove(0);
-                // since we generate the list transactions from the same list of members we use we can just unwrap here
+
                 let Some(rel) = members.find_member(t.code) else {
                     println!("No relation found for {}", t.code);
                     continue;

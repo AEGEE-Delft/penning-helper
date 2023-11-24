@@ -1,5 +1,6 @@
-use std::{io::Read, num::ParseFloatError};
+use std::{collections::HashMap, io::Read, num::ParseFloatError, path::Path};
 
+use csv::Reader;
 use penning_helper_types::Euro;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +27,7 @@ impl TryFrom<CsvEntry> for TurfListRow {
 
     fn try_from(value: CsvEntry) -> Result<Self, Self::Error> {
         let total = value.total.parse::<f64>()?;
+        println!("{}: {}", total, Euro::from(total));
         let mut e = Self::new(value.name, value.email, Euro::from(total), None);
         e.set_what(value.description);
         Ok(e)
@@ -40,15 +42,80 @@ pub enum CsvReadError {
     EuroParseError(#[from] ParseFloatError),
 }
 
-pub fn read_csv(r: impl Read) -> Result<TurfList, CsvReadError> {
-    let mut rdr = csv::Reader::from_reader(r);
+pub fn try_loyverse<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadError> {
     let mut list = vec![];
+    let mut t = 0.0;
     for result in rdr.deserialize() {
         let record: CsvEntry = result?;
         if record.payment_type != "AEGEE-DELFT" {
             continue;
         }
+        t += record.total.parse::<f64>()?;
         list.push(record.try_into()?);
     }
+    println!("Total: {}", t);
     Ok(TurfList::new(list))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TurffEntry {
+    #[serde(rename = "UID")]
+    uid: String,
+    #[serde(rename = "Naam")]
+    name: String,
+    #[serde(flatten)]
+    data: HashMap<String, serde_json::Value>,
+}
+
+impl TryFrom<TurffEntry> for TurfListRow {
+    type Error = ParseFloatError;
+
+    fn try_from(value: TurffEntry) -> Result<Self, Self::Error> {
+        let mut e = Self::new(value.name, "This Is a Very long string that will probably never match to a valid email address, i really hope this works :p".to_string(), Euro::from(0.0), None);
+        let mut acc = vec![];
+        for (k, v) in value.data {
+            let price = if let Some(v) = v.as_f64() {
+                Euro::from(v)
+            } else if let Some(v) = v.as_i64() {
+                Euro::from(v)
+            } else if let Some(v) = v.as_str() {
+                
+                Euro::from(v.replace(',', ".").parse::<f64>()?)
+            } else {
+                println!("Skipping {}", k);
+                continue;
+            };
+
+            e.amount += price;
+            if price != Euro::default() {
+                acc.push(format!("{}: {}", k, v));
+            }
+        }
+        e.set_what(acc.join(", "));
+        Ok(e)
+    }
+}
+
+pub fn try_turff<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadError> {
+    let mut list = vec![];
+    let mut t = Euro::default();
+    for result in rdr.deserialize() {
+        let record: TurffEntry = result?;
+        let converted: TurfListRow = record.try_into()?;
+        if converted.amount != Euro::default() {
+            t += converted.amount;
+            list.push(converted);
+        }
+    }
+    println!("Total: {}", t);
+    Ok(TurfList::new(list))
+}
+
+pub fn read_csv(r: impl AsRef<Path>) -> Result<TurfList, CsvReadError> {
+    let r = r.as_ref();
+    if let Ok(l) = try_loyverse(csv::ReaderBuilder::new().from_path(r)?) {
+        return Ok(l);
+    } else {
+        return try_turff(csv::ReaderBuilder::new().delimiter(b';').from_path(r)?);
+    }
 }
