@@ -744,7 +744,9 @@ impl TurflistImport {
                     .iter()
                     .map(|m| m.email_address.clone())
                     .collect::<Vec<_>>();
-                self.matched = Some(o.get_matches(&names, &emails));
+                let mut matches = o.get_matches(&names, &emails);
+                matches.remove_zero_cost();
+                self.matched = Some(matches);
                 self.last_len = members.len();
             }
         }
