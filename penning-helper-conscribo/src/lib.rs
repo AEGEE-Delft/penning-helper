@@ -138,6 +138,7 @@ impl ConscriboClient {
 
         let mut res: Vec<Relation> = res.into();
         res.iter_mut().for_each(|r| r.source = et.clone());
+        // res.iter_mut().for_each(|r| r.naam = format!("{} ({})", r.naam, r.code));
 
         Ok(res)
     }

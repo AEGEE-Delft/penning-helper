@@ -1045,6 +1045,10 @@ impl SepaGen {
                 transactions.push(t);
             }
 
+            transactions.sort_by_cached_key(|t| t.name.clone());
+            invalid.sort_by_cached_key(|t| t.name.clone());
+            big_money.sort_by_cached_key(|t| t.name.clone());
+
             self.transactions = transactions;
             self.invalid_transactions = invalid;
             self.too_high_transactions = big_money;

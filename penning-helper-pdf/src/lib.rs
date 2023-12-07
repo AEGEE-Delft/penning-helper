@@ -4,6 +4,7 @@ use genpdf::{
     style::StyledString,
     Element, Margins,
 };
+use image::Pixel;
 use once_cell::sync::Lazy;
 use penning_helper_types::{Date, Euro};
 
@@ -77,7 +78,8 @@ impl<'a> SimpleTransaction<'a> {
     }
 }
 
-pub fn create_invoice_pdf(transactions: Vec<SimpleTransaction>, name: &str) -> Vec<u8> {
+pub fn create_invoice_pdf(mut transactions: Vec<SimpleTransaction>, name: &str) -> Vec<u8> {
+    transactions.sort_by_key(|v| v.date);
     let total = transactions.iter().map(|t| t.cost).sum::<Euro>();
     let font = genpdf::fonts::from_files("./fonts", "Roboto", None).unwrap();
     let mut doc = genpdf::Document::new(font);
@@ -94,11 +96,22 @@ pub fn create_invoice_pdf(transactions: Vec<SimpleTransaction>, name: &str) -> V
     doc.set_page_decorator(decorator);
     let logo = include_bytes!("../../penning-helper-mail/logo.png");
     let image = image::load_from_memory(logo).unwrap();
-    let image = image.to_rgb8();
+    let mut image = image.to_rgba8();
     let w = image.width();
     let max_w = 500;
     let scale_w = max_w as f64 / w as f64;
-    let image = image::DynamicImage::ImageRgb8(image);
+    image.pixels_mut().for_each(|pixel| {
+        let pixels = pixel.channels_mut();
+        if pixels[3] == 0 {
+            pixels[0] = 255;
+            pixels[1] = 255;
+            pixels[2] = 255;
+            pixels[3] = 255;
+        }
+    });
+    let image = image::DynamicImage::ImageRgba8(image);
+    let image = image::DynamicImage::ImageRgb8(image.to_rgb8());
+    
 
     let image = genpdf::elements::Image::from_dynamic_image(image)
         .expect("Failed to load test image")
@@ -159,9 +172,14 @@ pub fn create_invoice_pdf(transactions: Vec<SimpleTransaction>, name: &str) -> V
                 )),
                 Margins::trbl(1, 1, 5, 1),
             ))
-            .element(
-                genpdf::elements::Paragraph::new(format!("{}", t.description)).wrap_small_pad(),
-            )
+            .element({
+                let mut list = genpdf::elements::LinearLayout::vertical();
+                for l in t.description.lines() {
+                    list.push(genpdf::elements::Paragraph::new(l));
+                }
+
+                list.wrap_small_pad()
+            })
             .element(debet.wrap_small_pad())
             .element(credit.wrap_small_pad())
             .push()

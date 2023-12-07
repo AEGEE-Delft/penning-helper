@@ -9,17 +9,25 @@ use crate::turflist::{TurfList, TurfListRow};
 #[derive(Debug, Deserialize, Serialize)]
 struct CsvEntry {
     // Datum,Bon nummer,Bon soort,Bruto-omzet,Kortingen,Netto-omzet,Btw,Fooien,Totaal verzameld,Kosten van goederen,Bruto winst,Betaalwijzen,Omschrijving,POS,Winkel,Naam medewerker,Naam klant,Klant contacten,Status
-    #[serde(rename = "Totaal verzameld", alias = "Total collected")]
+    #[serde(alias = "Totaal verzameld", alias = "Total collected", alias = "Total", alias = "Totaal")]
     total: String,
-    #[serde(rename = "Naam klant", alias = "Customer name")]
+    #[serde(alias = "Naam klant", alias = "Customer name", alias = "Name", alias = "Naam")]
     name: String,
-    #[serde(rename = "Klant contacten", alias = "Customer contacts")]
+    #[serde(alias = "Klant contacten", alias = "Customer contacts", alias = "Email", alias = "E-mail", default = "default_email")]
     email: String,
-    #[serde(rename = "Payment type")]
+    #[serde(alias = "Payment type", default = "payment_type_default")]
     payment_type: String,
 
-    #[serde(rename = "Description")]
+    #[serde(alias = "Description", alias = "Omschrijving", default)]
     description: String,
+}
+
+fn payment_type_default() -> String {
+    "AEGEE-DELFT".to_string()
+}
+
+fn default_email() -> String {
+    "This Is a Very long string that will probably never match to a valid email address".to_string()
 }
 
 impl TryFrom<CsvEntry> for TurfListRow {
@@ -59,8 +67,6 @@ pub fn try_loyverse<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadErro
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TurffEntry {
-    #[serde(rename = "UID")]
-    uid: String,
     #[serde(rename = "Naam")]
     name: String,
     #[serde(flatten)]
