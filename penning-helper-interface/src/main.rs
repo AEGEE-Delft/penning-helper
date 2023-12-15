@@ -34,7 +34,6 @@ use popup::{ErrorThing, Popup};
 use rand::Rng;
 use settings::SettingsWindow;
 
-mod background_requester;
 mod file_receiver;
 mod popup;
 mod settings;
@@ -247,15 +246,6 @@ impl eframe::App for PenningHelperApp {
                 let relations = self.conscribo_client.run(|c| {
                     let members = c.get_relations("lid").unwrap();
                     let others = c.get_relations("onbekend").unwrap();
-                    // let others = others
-                    //     .into_iter()
-                    //     .filter(|o| !members.iter().any(|m| m.naam == o.naam))
-                    //     .collect::<Vec<_>>();
-                    // let all_relations = members
-                    //     .into_iter()
-                    //     .chain(others.into_iter())
-                    //     // .filter(|r| r.naam == "Julius de Jeu")
-                    //     .collect::<Vec<_>>();
                     vec![members, others]
                 });
                 if let Some(relations) = relations {
@@ -1038,7 +1028,7 @@ impl SepaGen {
             false
         } else if !self.sorted {
             let mut transactions = vec![];
-            
+
             for t in self.transactions.clone() {
                 if t.total_cost() == Euro::default() {
                     continue;

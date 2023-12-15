@@ -14,6 +14,8 @@ pub use requests::*;
 
 mod results;
 pub use results::*;
+mod async_client;
+pub use async_client::ConscriboClient as AsyncConscriboClient;
 
 use penning_helper_types::Date;
 

@@ -26,20 +26,12 @@ impl Popup {
         Self::new(title, D::default())
     }
 
-    /// The sad part about this is that you can't really get the original type back.
-    /// So we have to use Any::downcast_ref() to get the value back.
-    /// This is not ideal, but it works.
     pub fn value<V: Any>(&self) -> Option<&V> {
         if self.open {
             return None;
         }
         self.data.as_any().downcast_ref()
     }
-
-    // /// See [`Popup::value()`], but this one copies the value.
-    // pub fn value_owned<V: Any + Copy>(&self) -> Option<V> {
-    //     self.value().copied()
-    // }
 
     pub fn show(&mut self, ctx: &egui::Context) {
         let mut open = self.open;
