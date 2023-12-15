@@ -274,7 +274,6 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
     type Error = TransactionConvertError;
 
     fn try_from(value: Transaction) -> Result<Self, Self::Error> {
-        let description = value.description;
         let date = value.date;
 
         let mut rows = HashMap::new();
@@ -296,7 +295,7 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
                     ),
                     date,
                     code: r,
-                    description: description.clone(),
+                    description: row.description.clone(),
                     reference: row.reference.clone().unwrap_or_else(|| "????".to_string()),
                     cost: Default::default(),
                 });

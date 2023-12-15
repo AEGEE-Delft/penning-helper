@@ -857,6 +857,10 @@ impl RelationTransaction {
             .map(|t| t.cost)
             .sum()
     }
+
+    fn is_valid(&self) -> bool {
+        !self.iban.is_empty() && !self.bic.is_empty() && !self.email.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -866,16 +870,27 @@ enum SendMode {
     Real,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Show {
+    #[default]
+    All,
+    OwesUsALot,
+    IsOwedByUs,
+}
+
+impl Show {
+    fn filter(&self, t: &RelationTransaction) -> bool {
+        match self {
+            Show::All => true,
+            Show::OwesUsALot => t.total_cost() > Euro::from(100),
+            Show::IsOwedByUs => t.total_cost() < Euro::from(-10),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct SepaGen {
-    /// These are the transactions that are good for us
     transactions: Vec<RelationTransaction>,
-    /// These ones miss an iban or bic (or both)
-    invalid_transactions: Vec<RelationTransaction>,
-    /// These ones have a total cost of over 100 euros
-    /// They will only have 100 euros deducted from their account
-    /// and will have to pay the rest manually
-    too_high_transactions: Vec<RelationTransaction>,
     unifieds: Vec<UnifiedTransaction>,
     unifieds_grabbed: bool,
     sorted: bool,
@@ -887,6 +902,7 @@ struct SepaGen {
     email_client: Option<MailServer>,
     has_tried_mail: bool,
     last_invoice_date: Date,
+    show: Show,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -1022,8 +1038,7 @@ impl SepaGen {
             false
         } else if !self.sorted {
             let mut transactions = vec![];
-            let mut invalid = vec![];
-            let mut big_money = vec![];
+            
             for t in self.transactions.clone() {
                 if t.total_cost() == Euro::default() {
                     continue;
@@ -1032,26 +1047,13 @@ impl SepaGen {
                     println!("No email for {}", t.name);
                     continue;
                 }
-                if t.bic.is_empty() || t.iban.is_empty() {
-                    invalid.push(t);
-                    continue;
-                }
-                let total = t.total_cost();
-                if total > 100.into() {
-                    big_money.push(t);
-                    continue;
-                }
 
                 transactions.push(t);
             }
 
             transactions.sort_by_cached_key(|t| t.name.clone());
-            invalid.sort_by_cached_key(|t| t.name.clone());
-            big_money.sort_by_cached_key(|t| t.name.clone());
 
             self.transactions = transactions;
-            self.invalid_transactions = invalid;
-            self.too_high_transactions = big_money;
             self.sorted = true;
             false
         } else {
@@ -1070,7 +1072,13 @@ impl SepaGen {
                         if !self.done {
                             let mut creditors = vec![];
                             let mut debtors = vec![];
-                            for t in &self.transactions {
+                            for t in self
+                                .transactions
+                                .iter()
+                                .filter(|t| t.total_cost() != Euro::default())
+                                .filter(|t| t.is_valid())
+                                .filter(|t| self.show.filter(t))
+                            {
                                 let total = t.total_cost();
                                 if total < Euro::default() {
                                     // it's a creditor
@@ -1083,36 +1091,34 @@ impl SepaGen {
                                     );
                                     creditors.push(c);
                                 } else if total > Euro::default() {
-                                    if total > 100.into() {}
                                     // it's a debtor
-                                    let d = foobar.sepa.new_debtor(
-                                        total,
-                                        t.name.clone(),
-                                        t.bic.clone(),
-                                        t.iban.clone(),
-                                        t.code,
-                                        t.membership_date,
-                                        "Invoice of open AEGEE-Delft balance".to_string(),
-                                    );
+                                    let d = if total >= 100.into() {
+                                        let total = 99.99.into();
+                                        foobar.sepa.new_debtor(
+                                            total,
+                                            t.name.clone(),
+                                            t.bic.clone(),
+                                            t.iban.clone(),
+                                            t.code,
+                                            t.membership_date,
+                                            "Partial invoice of open AEGEE-Delft balance"
+                                                .to_string(),
+                                        )
+                                    } else {
+                                        foobar.sepa.new_debtor(
+                                            total,
+                                            t.name.clone(),
+                                            t.bic.clone(),
+                                            t.iban.clone(),
+                                            t.code,
+                                            t.membership_date,
+                                            "Invoice of open AEGEE-Delft balance".to_string(),
+                                        )
+                                    };
                                     debtors.push(d);
                                 } else {
                                     // nothing
                                 }
-                            }
-                            // can pay max 100 euros per invoice, so we need to make this one 99.99 euros
-                            // and the rest will be paid manually
-                            for t in &self.too_high_transactions {
-                                let total = 99.99.into();
-                                let d = foobar.sepa.new_debtor(
-                                    total,
-                                    t.name.clone(),
-                                    t.bic.clone(),
-                                    t.iban.clone(),
-                                    t.code,
-                                    t.membership_date,
-                                    "Partial invoice of open AEGEE-Delft balance".to_string(),
-                                );
-                                debtors.push(d);
                             }
                             let debtors = foobar
                                 .sepa
@@ -1182,8 +1188,7 @@ impl SepaGen {
                                 .filter(|t| t.total_cost() != Euro::default())
                                 .take(1)
                                 .cloned()
-                                .chain(self.too_high_transactions.iter().take(1).cloned())
-                                .chain(self.invalid_transactions.iter().take(1).cloned())
+                                .filter(|t| self.show.filter(t))
                                 .collect();
                         }
                         SendMode::Real => {
@@ -1192,12 +1197,27 @@ impl SepaGen {
                                 .iter()
                                 .filter(|t| t.total_cost() != Euro::default())
                                 .cloned()
-                                .chain(self.too_high_transactions.iter().cloned())
-                                .chain(self.invalid_transactions.iter().cloned())
+                                .filter(|t| self.show.filter(t))
                                 .collect()
                         }
                     }
                 }
+
+                ui.collapsing("Filter", |ui| {
+                    ui.vertical(|ui| {
+                        ui.radio_value(&mut self.show, Show::All, "All");
+                        ui.radio_value(
+                            &mut self.show,
+                            Show::OwesUsALot,
+                            "Owes us more than 100 euros",
+                        );
+                        ui.radio_value(
+                            &mut self.show,
+                            Show::IsOwedByUs,
+                            "We owe them more than 10 euros",
+                        );
+                    })
+                });
                 if let Some(mail_client) = &self.email_client {
                     if !self.to_send.is_empty()
                         && (self.last_send + Duration::from_secs(5 * 60)) <= Instant::now()
@@ -1268,80 +1288,34 @@ impl SepaGen {
                 });
             })
             .body(|mut b| {
-                for t in self.transactions.iter() {
-                    let amount = t.total_cost();
-                    if amount == Euro::default() {
-                        continue;
-                    }
-                    b.row(20.0, |mut r| {
-                        r.col(|ui| {
-                            ui.label(&t.name);
-                        });
-                        r.col(|ui| {
-                            ui.label(amount.to_string());
-                        });
-                        r.col(|ui| {
-                            if ui.button("Open PDF").clicked() {
-                                let pdf = Self::get_pdf(self.last_invoice_date, t);
-                                let mut temp_file = std::env::temp_dir();
-                                let mut rng = rand::thread_rng();
-                                let random_name: String = std::iter::repeat(())
-                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
-                                    .take(10)
-                                    .collect();
-                                temp_file.push(random_name);
-                                temp_file.set_extension("pdf");
-                                let mut f = File::create(&temp_file).unwrap();
-                                f.write_all(&pdf).unwrap();
-                                open::that_detached(temp_file).unwrap();
-                            }
-                        });
-                    });
-                }
-                for t in self.too_high_transactions.iter() {
+                for t in self
+                    .transactions
+                    .iter()
+                    .filter(|t| t.total_cost() != Euro::default())
+                    .filter(|t| self.show.filter(t))
+                {
                     let amount = t.total_cost();
                     b.row(20.0, |mut r| {
                         r.col(|ui| {
-                            let text = RichText::new(&t.name).color(ui.visuals().warn_fg_color);
+                            let text = RichText::new(&t.name);
+                            let text = if amount > Euro::from(100) {
+                                text.color(ui.visuals().warn_fg_color)
+                            } else if !t.is_valid() {
+                                text.color(ui.visuals().error_fg_color)
+                            } else {
+                                text
+                            };
                             ui.label(text);
                         });
                         r.col(|ui| {
-                            let text = RichText::new(&amount.to_string())
-                                .color(ui.visuals().warn_fg_color);
-
-                            ui.label(text);
-                        });
-                        r.col(|ui| {
-                            if ui.button("Open PDF").clicked() {
-                                let pdf = Self::get_pdf(self.last_invoice_date, t);
-                                let mut temp_file = std::env::temp_dir();
-                                let mut rng = rand::thread_rng();
-                                let random_name: String = std::iter::repeat(())
-                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
-                                    .take(10)
-                                    .collect();
-                                temp_file.push(random_name);
-                                temp_file.set_extension("pdf");
-                                let mut f = File::create(&temp_file).unwrap();
-                                f.write_all(&pdf).unwrap();
-                                open::that_detached(temp_file).unwrap();
-                            }
-                        });
-                    });
-                }
-                for t in self.invalid_transactions.iter() {
-                    let amount = t.total_cost();
-                    if amount == Euro::default() {
-                        continue;
-                    }
-                    b.row(20.0, |mut r| {
-                        r.col(|ui| {
-                            let text = RichText::new(&t.name).color(Color32::RED);
-                            ui.label(text);
-                        });
-                        r.col(|ui| {
-                            let text = RichText::new(&amount.to_string()).color(Color32::RED);
-
+                            let text = RichText::new(amount.to_string());
+                            let text = if amount > Euro::from(100) {
+                                text.color(ui.visuals().warn_fg_color)
+                            } else if !t.is_valid() {
+                                text.color(ui.visuals().error_fg_color)
+                            } else {
+                                text
+                            };
                             ui.label(text);
                         });
                         r.col(|ui| {
