@@ -362,10 +362,10 @@ impl SepaGen {
                             }
                             let debtors = foobar
                                 .sepa
-                                .new_invoice_payment_information(Date::in_some_days(1), debtors);
+                                .new_invoice_payment_information(Date::in_some_days(3), debtors);
                             let creditors = foobar
                                 .sepa
-                                .new_transfer_payment_information(Date::in_some_days(1), creditors);
+                                .new_transfer_payment_information(Date::in_some_days(6), creditors);
                             let debtors = foobar.sepa.new_invoice_document(debtors);
                             let creditors = foobar.sepa.new_transfer_document(creditors);
 
