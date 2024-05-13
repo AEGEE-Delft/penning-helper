@@ -54,6 +54,7 @@ pub fn try_loyverse<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadErro
     let mut list = vec![];
     let mut t = 0.0;
     for result in rdr.deserialize() {
+        println!("{:?}", result);
         let record: CsvEntry = result?;
         if record.payment_type != "AEGEE-DELFT" {
             continue;
@@ -77,7 +78,7 @@ impl TryFrom<TurffEntry> for TurfListRow {
     type Error = ParseFloatError;
 
     fn try_from(value: TurffEntry) -> Result<Self, Self::Error> {
-        let mut e = Self::new(value.name, "This Is a Very long string that will probably never match to a valid email address, i really hope this works :p".to_string(), Euro::from(0.0), None);
+        let mut e = Self::new(value.name, default_email(), Euro::from(0.0), None);
         let mut acc = vec![];
         for (k, v) in value.data {
             let price = if let Some(v) = v.as_f64() {

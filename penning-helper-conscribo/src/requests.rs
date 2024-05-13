@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
+use crate::results::*;
+use crate::LoginResult;
+use crate::Side;
 use penning_helper_macros::set_command;
 use penning_helper_types::{Date, Euro};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr, EnumMap};
-
-use crate::Side;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConscriboRequest<T> {
@@ -43,6 +47,8 @@ impl<T> ConscriboRequest<ReqHolder<T>> {
 pub trait ToRequest: Sized + Serialize {
     const COMMAND: &'static str;
 
+    type Response: DeserializeOwned;
+
     fn to_request(self) -> ConscriboRequest<ReqHolder<Self>> {
         ConscriboRequest {
             request: ReqHolder {
@@ -62,7 +68,7 @@ pub struct ReqHolder<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[set_command(authenticateWithUserAndPass)]
+#[set_command(authenticateWithUserAndPass -> LoginResult)]
 pub struct LoginRequest {
     user_name: String,
     pass_phrase: String,
@@ -79,7 +85,7 @@ impl LoginRequest {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-#[set_command(listFieldDefinitions)]
+#[set_command(listFieldDefinitions -> FieldRes)]
 pub struct FieldReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     entity_type: Option<String>,
@@ -95,10 +101,12 @@ impl FieldReq {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[set_command(listRelations)]
-pub struct ListRelations {
+#[set_command(listRelations -> Relations<R>)]
+pub struct ListRelations<R: DeserializeOwned + Serialize> {
     entity_type: String,
     requested_fields: RequestFields,
+    #[serde(skip)]
+    _phantom: std::marker::PhantomData<R>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -107,19 +115,43 @@ struct RequestFields {
     field_name: Vec<String>,
 }
 
-impl ListRelations {
-    pub fn new(entity_type: String, fields: Vec<String>) -> Self {
+impl<R: DeserializeOwned + Serialize> ListRelations<R> {
+    pub fn new(entity_type: impl ToString, fields: Vec<impl ToString>) -> Self {
         Self {
-            entity_type,
-            requested_fields: RequestFields { field_name: fields },
+            entity_type: entity_type.to_string(),
+            requested_fields: RequestFields {
+                field_name: fields.into_iter().map(|f| f.to_string()).collect(),
+            },
+            _phantom: std::marker::PhantomData,
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[set_command(replaceRelations -> ReplaceRelationsResult)]
+pub struct UpdateRelation {
+    code: String,
+    fields: HashMap<String, Value>,
+}
+
+impl UpdateRelation {
+    pub fn new(code: String) -> Self {
+        Self {
+            code,
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn add_field(&mut self, field: impl ToString, value: impl Serialize) {
+        self.fields
+            .insert(field.to_string(), serde_json::to_value(value).unwrap());
     }
 }
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[set_command(listTransactions)]
+#[set_command(listTransactions -> Transactions)]
 pub struct ListTransactions {
     #[serde_as(as = "EnumMap")]
     filters: Vec<TransactionFilter>,
@@ -152,7 +184,7 @@ impl TransactionFilter {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[set_command(addChangeTransaction)]
+#[set_command(addChangeTransaction -> TransactionResult)]
 pub struct AddChangeTransaction {
     #[serde(skip_serializing_if = "Option::is_none")]
     transaction_id: Option<i32>,
@@ -251,5 +283,54 @@ impl AddChangeTransaction {
             reference,
             relation_nr,
         )
+    }
+
+    pub fn add_merch(
+        self,
+        relation_nr: u32,
+        merch_rekening: String,
+        merch_verkoop_rekening: String,
+        total_amount: Euro,
+        merch_price: Euro,
+        reference: String,
+    ) -> Self {
+        self.with_row(
+            merch_rekening,
+            merch_price,
+            Side::Credit,
+            reference.clone(),
+            relation_nr,
+        )
+        .with_row(
+            merch_verkoop_rekening,
+            total_amount - merch_price,
+            Side::Credit,
+            reference.clone(),
+            relation_nr,
+        )
+        .with_row(
+            "1001".to_string(),
+            total_amount,
+            Side::Debet,
+            reference,
+            relation_nr,
+        )
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[set_command(listAccounts -> AccountResult)]
+pub struct ListAccounts {
+    date: Date,
+}
+
+impl ListAccounts {
+    pub fn new(date: Date) -> Self {
+        Self { date }
+    }
+
+    pub fn today() -> Self {
+        Self::new(Date::today())
     }
 }

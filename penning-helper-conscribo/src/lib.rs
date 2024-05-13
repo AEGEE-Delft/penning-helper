@@ -23,7 +23,7 @@ const VERSION: &str = "0.20161212";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LoginResult {
+pub struct LoginResult {
     session_id: String,
 }
 
@@ -34,6 +34,16 @@ pub struct ConscriboClient {
     url: String,
     transactions: Arc<RwLock<Option<Vec<UnifiedTransaction>>>>,
     getting_transactions: RefCell<bool>,
+}
+
+pub trait RelationType: Serialize + DeserializeOwned {
+    const ENTITY_TYPE: &'static str;
+
+    fn entity_type() -> &'static str {
+        Self::ENTITY_TYPE
+    }
+
+    fn fields() -> Vec<&'static str>;
 }
 
 impl ConscriboClient {
@@ -70,10 +80,10 @@ impl ConscriboClient {
         Self::new(&cfg.username, &cfg.password, &cfg.url)
     }
 
-    pub fn do_request<A: ToRequest, R: DeserializeOwned>(&self, req: A) -> ConscriboResult<R> {
+    pub fn do_request<A: ToRequest>(&self, req: A) -> ConscriboResult<A::Response> {
         let t = self.do_request_str(req)?;
         // println!("{}", t);
-        let value: RootResult<R> = serde_json::from_str(&t)?;
+        let value: RootResult<A::Response> = serde_json::from_str(&t)?;
         value.to_result()
     }
 
@@ -91,10 +101,10 @@ impl ConscriboClient {
         Ok(t)
     }
 
-    pub fn do_multi_request<A: ToRequest, R: DeserializeOwned>(
+    pub fn do_multi_request<A: ToRequest>(
         &self,
         reqs: Vec<A>,
-    ) -> ConscriboResult<Vec<R>> {
+    ) -> ConscriboResult<Vec<A::Response>> {
         let multi_req = ConscriboMultiRequest::new(reqs);
         let t = self
             .client
@@ -105,7 +115,7 @@ impl ConscriboClient {
             .send()?
             .text()?;
         // println!("{}", t);
-        let value: MultiRootResult<R> = serde_json::from_str(&t)?;
+        let value: MultiRootResult<A::Response> = serde_json::from_str(&t)?;
         value.into()
     }
 
@@ -115,7 +125,7 @@ impl ConscriboClient {
         Ok(res.fields)
     }
 
-    pub fn get_relations(&self, entity_type: impl ToString) -> ConscriboResult<Vec<Relation>> {
+    pub fn get_relations<'a, R: 'a + RelationType>(&self) -> ConscriboResult<Vec<R>> {
         // {
         //     if let Ok(f) =
         //         std::fs::File::open(format!("relations_{}.json", entity_type.to_string()))
@@ -124,25 +134,35 @@ impl ConscriboClient {
         //         return Ok(res.into());
         //     }
         // }
-        let et = entity_type.to_string();
-        let req = ListRelations::new(
-            et.clone(),
-            vec![
-                "code".to_string(),
-                "naam".to_string(),
-                "email".to_string(),
-                "rekening".to_string(),
-                "membership_started".to_string(),
-                "geen_invoice".to_string(),
-            ],
-        );
-        let res: Relations = self.do_request(req)?;
+        let fields = R::fields();
+        // let mut fields = vec![
+        //     "code".to_string(),
+        //     "weergavenaam".to_string(),
+        //     "email".to_string(),
+        //     "rekening".to_string(),
+        //     "membership_started".to_string(),
+        //     "geen_invoice".to_string(),
+        // ];
+        // if et == "lid" {
+        //     fields.push("alumni_lidmaatschap_gestart".to_string());
+        //     fields.push("alumni_lidmaatschap_be__indigt".to_string());
+        //     fields.push("alumni_contributie".to_string());
+        // }
+        let req = ListRelations::new(R::ENTITY_TYPE.to_string(), fields);
+        let res: Relations<R> = self.do_request(req)?;
 
-        let mut res: Vec<Relation> = res.into();
-        res.iter_mut().for_each(|r| r.source = et.clone());
+        let res: Vec<R> = res.into();
         // res.iter_mut().for_each(|r| r.naam = format!("{} ({})", r.naam, r.code));
 
         Ok(res)
+    }
+
+    pub fn update_relations(
+        &self,
+        relations: Vec<UpdateRelation>,
+    ) -> ConscriboResult<Vec<ReplaceRelationsResult>> {
+        let r: Vec<ReplaceRelationsResult> = self.do_multi_request(relations)?;
+        Ok(r)
     }
 
     pub fn get_transactions(
@@ -163,11 +183,11 @@ impl ConscriboClient {
             Cache::default()
         };
         *self.getting_transactions.borrow_mut() = true;
-        let mensen = self.get_relations("lid")?;
-        let onbekend = self.get_relations("onbekend")?;
+        let mensen: Vec<Member> = self.get_relations()?;
+        let onbekend: Vec<NonMember> = self.get_relations()?;
         let mensen = mensen
             .into_iter()
-            .chain(onbekend.into_iter())
+            .chain(onbekend.into_iter().map(|m| m.into()))
             .collect::<Vec<_>>();
         let codes = mensen.iter().map(|m| m.code.clone()).collect::<Vec<_>>();
         let req = ListTransactions::new(vec![
@@ -195,7 +215,7 @@ impl ConscriboClient {
                     .unwrap()
                     .text()
                     .unwrap();
-                println!("{}", r);
+                // println!("{}", r);
 
                 let value: RootResult<Transactions> = serde_json::from_str(&r).unwrap();
 

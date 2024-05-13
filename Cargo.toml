@@ -14,7 +14,7 @@ penning-helper-types = { path = "penning-helper-types" }
 penning-helper-mail = { path = "penning-helper-mail" }
 penning-helper-config = { path = "penning-helper-config" }
 penning-helper-turflists = { path = "penning-helper-turflists" }
-
+serde_json = "1.0"
 
 
 [workspace]
@@ -30,5 +30,6 @@ members = [
     "penning-helper-turflists",
     "penning-helper-interface",
     # "penning-helper-interface-v2",
-    "penning-helper-pdf",
+    "penning-helper-pdf", 
+    "penning-helper-macros-impl",
 ]

@@ -15,3 +15,4 @@ serde_with = "3.3"
 chrono = "0.4"
 penning-helper-types = { path = "../penning-helper-types" }
 penning-helper-config = { path = "../penning-helper-config" }
+textdistance = "1.0"

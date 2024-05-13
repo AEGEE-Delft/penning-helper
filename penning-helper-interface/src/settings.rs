@@ -70,6 +70,12 @@ impl SettingsWindow {
         });
         labelled_row(
             ui,
+            "Merch Sale Account",
+            &mut self.config.conscribo_mut().merch_winst_rekening,
+            "0000-00",
+        );
+        labelled_row(
+            ui,
             "URL",
             &mut self.config.conscribo_mut().url,
             "https://secure.conscribo.nl/aegee-delft/request.json",
@@ -137,7 +143,7 @@ impl SettingsWindow {
             &mut self.config.mail_mut().reply_to.address,
             "treasurer@aegee-delft.nl",
         );
-        
+
         ui.horizontal(|ui| {
             if ui.button("Save").clicked() {
                 self.config.save_to_file();

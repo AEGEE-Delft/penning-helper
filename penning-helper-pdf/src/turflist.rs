@@ -2,15 +2,40 @@ use std::path::PathBuf;
 
 use genpdf::{elements::FrameCellDecorator, style::StyledString, Element, Margins};
 use penning_helper_turflists::turflist::TurfListRow;
+use penning_helper_types::Euro;
 use rand::Rng;
 
 use crate::FONT_FAMILY;
 
-pub fn generate_turflist_pdf(
-    data: &[(&str, &TurfListRow)],
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SimpleTurfRow<'s> {
+    who: &'s str,
+    what: &'s str,
+    total: Euro,
+}
+
+impl<'s> From<(&'s str, &'s TurfListRow)> for SimpleTurfRow<'s> {
+    fn from((who, row): (&'s str, &'s TurfListRow)) -> Self {
+        Self {
+            who,
+            what: row.what.as_ref().map(String::as_str).unwrap_or(""),
+            total: row.amount,
+        }
+    }
+}
+
+impl<'s> SimpleTurfRow<'s> {
+    pub fn new(who: &'s str, what: &'s str, total: Euro) -> Self {
+        Self { who, what, total }
+    }
+}
+
+pub fn generate_turflist_pdf<'a>(
+    data: Vec<impl Into<SimpleTurfRow<'a>>>,
     desription: &str,
     reference: &str,
 ) -> PathBuf {
+    let data: Vec<SimpleTurfRow> = data.into_iter().map(|d| d.into()).collect::<Vec<_>>();
     let mut doc = genpdf::Document::new(FONT_FAMILY.clone());
     doc.set_title(desription);
     doc.set_line_spacing(1.2);
@@ -42,10 +67,13 @@ pub fn generate_turflist_pdf(
         table
     });
     doc.set_page_decorator(decorator);
-    doc.push(genpdf::elements::Paragraph::new(StyledString::new(
-        desription,
-        genpdf::style::Style::new().with_font_size(20).bold(),
-    )));
+    doc.push(genpdf::elements::PaddedElement::new(
+        genpdf::elements::Paragraph::new(StyledString::new(
+            desription,
+            genpdf::style::Style::new().with_font_size(20).bold(),
+        )),
+        Margins::trbl(0, 0, 5, 0),
+    ));
     // doc.push(genpdf::elements::Paragraph::new(StyledString::new(
     //     reference,
     //     genpdf::style::Style::new().with_font_size(10),
@@ -79,29 +107,26 @@ pub fn generate_turflist_pdf(
         .push()
         .unwrap();
 
-    for (who, t) in data {
+    for r in data {
         table
             .row()
             .element(genpdf::elements::PaddedElement::new(
                 genpdf::elements::Paragraph::new(StyledString::new(
-                    *who,
+                    r.who,
                     genpdf::style::Style::new(),
                 )),
                 Margins::trbl(1, 1, 1, 1),
             ))
             .element(genpdf::elements::PaddedElement::new(
                 genpdf::elements::Paragraph::new(StyledString::new(
-                    t.what
-                        .as_ref()
-                        .map(String::as_str)
-                        .unwrap_or_else(|| &desription),
+                    r.what,
                     genpdf::style::Style::new(),
                 )),
                 Margins::trbl(1, 1, 1, 1),
             ))
             .element(genpdf::elements::PaddedElement::new(
                 genpdf::elements::Paragraph::new(StyledString::new(
-                    t.amount.to_string(),
+                    r.total.to_string(),
                     genpdf::style::Style::new(),
                 )),
                 Margins::trbl(1, 1, 1, 1),

@@ -1,11 +1,15 @@
-use std::{collections::HashMap, fmt::Display, ops::Deref};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
 use penning_helper_types::Euro;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, DisplayFromStr, KeyValueMap};
 use thiserror::Error;
 
-use crate::{ConscriboError, ConscriboResult, Date};
+use crate::{ConscriboError, ConscriboResult, Date, RelationType};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RootResult<T> {
@@ -15,7 +19,7 @@ pub struct RootResult<T> {
 impl<T> RootResult<T> {
     pub fn to_result(self) -> ConscriboResult<T> {
         match self.result {
-            ConscriboResultE::Ok { result, success: _ } => Ok(result),
+            ConscriboResultE::Ok { result, ..} => Ok(result),
             ConscriboResultE::Err {
                 notifications,
                 success: _,
@@ -120,28 +124,28 @@ pub struct FieldRes {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
-    field_name: String,
+    pub field_name: String,
     entity_type: String,
-    label: String,
+    pub label: String,
     description: String,
     #[serde(rename = "type")]
     field_type: String,
     // required: Option<bool>,
     read_only: bool,
-    shared_field_name: Option<String>,
+    pub shared_field_name: Option<String>,
 }
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Relations {
+pub struct Relations<R: DeserializeOwned + Serialize> {
     result_count: String,
     #[serde_as(as = "KeyValueMap<_>")]
-    relations: Vec<Relation>,
+    relations: Vec<R>,
 }
 
-impl From<Relations> for Vec<Relation> {
-    fn from(relations: Relations) -> Self {
+impl<R: DeserializeOwned + Serialize> From<Relations<R>> for Vec<R> {
+    fn from(relations: Relations<R>) -> Self {
         relations.relations
     }
 }
@@ -149,11 +153,12 @@ impl From<Relations> for Vec<Relation> {
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Relation {
+pub struct Member {
     #[serde(rename = "$key$")]
     internal_id: String,
     #[serde_as(as = "DisplayFromStr")]
     pub code: u32,
+    #[serde(alias = "weergavenaam")]
     pub naam: String,
     #[serde(alias = "e_mailadres", alias = "email")]
     pub email_address: String,
@@ -161,11 +166,88 @@ pub struct Relation {
     pub rekening: Option<Account>,
     #[serde(default, rename = "membership_started")]
     pub membership_started: Option<Date>,
-    #[serde(skip)]
-    pub source: String,
     #[serde_as(as = "serde_with::BoolFromInt")]
     #[serde(default, alias = "geen_invoice")]
     pub no_invoice: bool,
+
+    #[serde(skip, default = "Member::entity_type")]
+    pub source: &'static str,
+
+    #[serde(alias = "alumni_lidmaatschap_gestart")]
+    pub alumni_lidmaatschap_gestart: Option<Date>,
+    #[serde(alias = "alumni_lidmaatschap_be__indigt")]
+    pub alumni_lidmaatschap_beeindigd: Option<Date>,
+    #[serde(alias = "alumni_contributie")]
+    pub alumni_contributie: Euro,
+}
+
+impl RelationType for Member {
+    const ENTITY_TYPE: &'static str = "lid";
+
+    fn fields() -> Vec<&'static str> {
+        vec![
+            "code",
+            "weergavenaam",
+            "email",
+            "rekening",
+            "membership_started",
+            "geen_invoice",
+            "alumni_lidmaatschap_gestart",
+            "alumni_lidmaatschap_be__indigt",
+            "alumni_contributie",
+        ]
+    }
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NonMember {
+    #[serde(rename = "$key$")]
+    internal_id: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub code: u32,
+    #[serde(alias = "weergavenaam")]
+    pub naam: String,
+    #[serde(alias = "e_mailadres", alias = "email")]
+    pub email_address: String,
+    #[serde(default, alias = "bankrekeningnummer")]
+    pub rekening: Option<Account>,
+    #[serde(default, rename = "membership_started")]
+    pub membership_started: Option<Date>,
+}
+
+impl RelationType for NonMember {
+    const ENTITY_TYPE: &'static str = "onbekend";
+
+    fn fields() -> Vec<&'static str> {
+        vec![
+            "code",
+            "weergavenaam",
+            "email",
+            "rekening",
+            "membership_started",
+            "geen_invoice",
+        ]
+    }
+}
+
+impl From<NonMember> for Member {
+    fn from(value: NonMember) -> Self {
+        Self {
+            internal_id: value.internal_id,
+            code: value.code,
+            naam: value.naam,
+            email_address: value.email_address,
+            rekening: value.rekening,
+            membership_started: value.membership_started,
+            no_invoice: false,
+            source: Self::ENTITY_TYPE,
+            alumni_lidmaatschap_gestart: None,
+            alumni_lidmaatschap_beeindigd: None,
+            alumni_contributie: Euro::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,4 +419,253 @@ impl UnifiedTransaction {
 pub struct TransactionResult {
     transaction_id: i32,
     transaction_nr: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceRelationsResult {
+    #[serde(default)]
+    relation_nr: Option<String>,
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountResult {
+    pub accounts: HashMap<String, Rekening>,
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rekening {
+    pub account_nr: String,
+    pub account_name: String,
+    pub parent: Option<usize>,
+    #[serde(rename = "type")]
+    pub account_type: String,
+    pub used_for_debit: bool,
+    pub used_for_credit: bool,
+    #[serde(default)]
+    pub transactional: bool,
+}
+
+impl AccountResult {
+    pub fn to_rekening_maps(self) -> RekeningMap {
+        let rekeningen = self.accounts;
+
+        let mut stack = VecDeque::new();
+        let mut rekening_maps = RekeningMap::new();
+        for (nr, rek) in rekeningen {
+            let rm = RekeningMapEntry {
+                nr: nr.parse().unwrap(),
+                account_nr: rek.account_nr,
+                account_name: rek.account_name,
+                children: Default::default(),
+            };
+            if let Some(parent) = rek.parent {
+                if let Some(parent) = rekening_maps.find_recursive_mut(parent) {
+                    parent.children.push(rm);
+                } else {
+                    stack.push_front((parent, rm));
+                }
+            } else {
+                rekening_maps.push(rm);
+            }
+        }
+
+        while let Some((parent, child)) = stack.pop_back() {
+            if let Some(parent) = rekening_maps.find_recursive_mut(parent) {
+                parent.children.push(child);
+            } else {
+                stack.push_front((parent, child));
+            }
+        }
+
+        rekening_maps
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct RekeningMap(Vec<RekeningMapEntry>);
+
+impl RekeningMap {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn find_recursive(&self, nr: usize) -> Option<&RekeningMapEntry> {
+        for entry in &self.0 {
+            if entry.nr == nr {
+                return Some(entry);
+            }
+            if let Some(entry) = entry.find_recursive(nr) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    pub fn find_recursive_mut(&mut self, nr: usize) -> Option<&mut RekeningMapEntry> {
+        for entry in &mut self.0 {
+            if entry.nr == nr {
+                return Some(entry);
+            }
+            if let Some(entry) = entry.find_recursive_mut(nr) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn push(&mut self, entry: RekeningMapEntry) {
+        self.0.push(entry);
+    }
+
+    pub fn find_closest_match(&self, name: &str) -> Option<&RekeningMapEntry> {
+        // uses textdistance::str::damerau_levenshtein(s1, s2), and works recursively
+        let best = f64::INFINITY;
+        self.find_closest_match_internal(&name.to_lowercase(), best)
+            .map(|(_, e)| e)
+    }
+
+    fn find_closest_match_internal(
+        &self,
+        name: &str,
+        mut best: f64,
+    ) -> Option<(f64, &RekeningMapEntry)> {
+        let mut best_entry = None;
+        for entry in &self.0 {
+            let account_name = &entry.account_name.to_lowercase();
+            let idx = account_name.find('(');
+            let score = if let Some(idx) = idx {
+                textdistance::nstr::damerau_levenshtein(
+                    &(account_name.split_at(idx).0.trim()),
+                    name,
+                )
+            } else {
+                textdistance::nstr::damerau_levenshtein(&account_name, name)
+            };
+
+            if score < best {
+                best = score;
+                best_entry = Some(entry);
+            }
+            if let Some((score, entry)) = entry.find_closest_match_internal(name, best) {
+                if score < best {
+                    best = score;
+                    best_entry = Some(entry);
+                }
+            }
+        }
+        best_entry.map(|e| (best, e))
+    }
+
+    pub fn iter(&self) -> RekeningMapRefIterator<'_> {
+        let mut stack = VecDeque::new();
+        stack.extend(self.0.iter());
+        RekeningMapRefIterator { stack }
+    }
+
+    pub fn find_by_name(&self, name: &str) -> Option<&RekeningMapEntry> {
+        self.iter().find(|e| e.account_name == name)
+    }
+}
+
+impl Deref for RekeningMap {
+    type Target = Vec<RekeningMapEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RekeningMapEntry {
+    pub nr: usize,
+    pub account_nr: String,
+    pub account_name: String,
+    pub children: RekeningMap,
+}
+
+impl Deref for RekeningMapEntry {
+    type Target = RekeningMap;
+
+    fn deref(&self) -> &Self::Target {
+        &self.children
+    }
+}
+
+impl DerefMut for RekeningMapEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.children
+    }
+}
+
+impl RekeningMapEntry {
+    pub fn number(&self) -> usize {
+        self.nr
+    }
+}
+
+impl AsRef<str> for RekeningMapEntry {
+    fn as_ref(&self) -> &str {
+        &self.account_name
+    }
+}
+
+pub struct RekeningMapIterator {
+    stack: VecDeque<RekeningMapEntry>,
+}
+
+pub struct RekeningMapRefIterator<'m> {
+    stack: VecDeque<&'m RekeningMapEntry>,
+}
+
+impl<'m> Iterator for RekeningMapRefIterator<'m> {
+    type Item = &'m RekeningMapEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = self.stack.pop_front()?;
+        self.stack.extend(entry.children.0.iter());
+        Some(entry)
+    }
+}
+
+impl Iterator for RekeningMapIterator {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = self.stack.pop_front()?;
+        self.stack.extend(entry.children.0.into_iter());
+        Some(entry.account_name)
+    }
+}
+
+impl RekeningMapIterator {
+    pub fn new(rekening_map: RekeningMap) -> Self {
+        let mut stack = VecDeque::new();
+        stack.extend(rekening_map.0.into_iter());
+        Self { stack }
+    }
+}
+
+impl IntoIterator for RekeningMap {
+    type Item = String;
+
+    type IntoIter = RekeningMapIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RekeningMapIterator::new(self)
+    }
+}
+
+impl<'a> IntoIterator for &'a RekeningMap {
+    type Item = &'a RekeningMapEntry;
+
+    type IntoIter = RekeningMapRefIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }

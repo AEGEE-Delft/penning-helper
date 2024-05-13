@@ -2,41 +2,39 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    cmp::min,
     collections::HashMap,
-    ffi::OsStr,
-    fs::File,
-    io::Write,
-    ops::{Add, Deref, DerefMut, Index},
-    path::PathBuf,
+    ops::Index,
     sync::{
         mpsc::{channel, Receiver, Sender},
         OnceLock,
     },
-    time::{Duration, Instant, SystemTime},
+    time::SystemTime,
 };
 
 use eframe::egui::{self, Ui};
-use egui::{Color32, ColorImage, RichText, TextEdit, Vec2, Visuals};
-use egui_dock::{NodeIndex, Style, Tree};
-use egui_extras::{Column, TableBuilder};
+use egui::{Color32, Visuals};
+use egui_dock::{DockState, NodeIndex, Style, SurfaceIndex};
+
 use file_receiver::{FileReceievers, FileReceiverResult, FileReceiverSource};
+use member_info::MemberInfo;
+use merch_sales::MerchSales;
 use penning_helper_config::{Config, ConscriboConfig};
-use penning_helper_conscribo::{
-    AddChangeTransaction, ConscriboClient, ConscriboResult, Relation, TransactionResult,
-    UnifiedTransaction,
-};
-use penning_helper_mail::MailServer;
-use penning_helper_turflists::{matched_turflist::MatchedTurflist, turflist::TurfList};
-use penning_helper_types::{Date, Euro};
+use penning_helper_conscribo::{ConscriboClient, ListAccounts, Member, NonMember, RekeningMap};
+
 use popup::{ErrorThing, Popup};
 
-use rand::Rng;
+use sepa_stuff::SepaGen;
 use settings::SettingsWindow;
+use turflist::TurflistImport;
 
 mod file_receiver;
+mod member_info;
+mod merch_sales;
 mod popup;
+mod sepa_stuff;
 mod settings;
+mod turflist;
+mod rekening_selector;
 
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
@@ -63,18 +61,19 @@ struct PenningHelperApp {
     r: Option<Receiver<String>>,
     members: Relations,
     sepa_stuff: penning_helper_sepa::SEPAConfig,
+    rekeningen: RekeningMap,
 }
 
 #[derive(Debug, Clone, Default)]
 struct Relations {
     remapper: HashMap<u32, u32>,
-    members: Vec<Relation>,
+    members: Vec<Member>,
 }
 
 impl Relations {
-    pub fn new(member_lists: &[Vec<Relation>]) -> Self {
+    pub fn new(member_lists: &[Vec<Member>]) -> Self {
         let mut remapper = HashMap::new();
-        let mut members: Vec<Relation> = vec![];
+        let mut members: Vec<Member> = vec![];
         for l in member_lists {
             for m in l {
                 if let Some(r) = members
@@ -92,16 +91,20 @@ impl Relations {
         Self { remapper, members }
     }
 
-    pub fn find_member(&self, code: u32) -> Option<&Relation> {
+    pub fn find_member(&self, code: u32) -> Option<&Member> {
         let actual_code = *self.remapper.get(&code)?;
         self.members.iter().find(|m| m.code == actual_code)
+    }
+
+    pub fn find_member_by_name(&self, name: &str) -> Option<&Member> {
+        self.find_member(self.members.iter().find(|m| m.naam == name)?.code)
     }
 
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Relation> {
+    pub fn iter(&self) -> impl Iterator<Item = &Member> {
         self.members.iter()
     }
 
@@ -111,7 +114,7 @@ impl Relations {
 }
 
 impl Index<usize> for Relations {
-    type Output = Relation;
+    type Output = Member;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.members[index]
@@ -125,6 +128,7 @@ struct FooBar<'t> {
     cfg: &'t Config,
     members: &'t Relations,
     sepa: &'t penning_helper_sepa::SEPAConfig,
+    accounts: &'t RekeningMap
 }
 
 impl<'t> FooBar<'t> {
@@ -136,6 +140,7 @@ impl<'t> FooBar<'t> {
             cfg: &app.settings_window.config,
             members: &app.members,
             sepa: &app.sepa_stuff,
+            accounts: &app.rekeningen
         }
     }
 }
@@ -233,7 +238,7 @@ impl PenningHelperApp {
 }
 
 impl eframe::App for PenningHelperApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.settings_window.show(ctx);
         for (_, p) in &mut self.popups {
             p.show(ctx);
@@ -244,12 +249,38 @@ impl eframe::App for PenningHelperApp {
                 penning_helper_sepa::SEPAConfig::from_config(self.settings_window.config.sepa());
             if self.members.is_empty() {
                 let relations = self.conscribo_client.run(|c| {
-                    let members = c.get_relations("lid").unwrap();
-                    let others = c.get_relations("onbekend").unwrap();
-                    vec![members, others]
+                    let fields = c.get_field_definitions("lid").unwrap();
+                    println!("Fields: {:?}", fields);
+                    for f in fields {
+                        println!("{} = {} ({})", f.label, f.field_name, f.shared_field_name.unwrap_or_default())
+                    }
+
+                    let members = c.get_relations::<Member>();
+                    let members = match members {
+                        Ok(m) => m,
+                        Err(e) => panic!("Error getting members: {}", e),
+                    };
+                    let others = c.get_relations::<NonMember>().unwrap();
+                    vec![members, others.into_iter().map(|o| o.into()).collect()]
                 });
                 if let Some(relations) = relations {
                     self.members = Relations::new(&relations);
+                }
+            }
+
+            if self.rekeningen.is_empty() {
+                if let Some(res) = self.conscribo_client.run(|c| {
+                    let res = c.do_request(ListAccounts::today());
+                    res
+                }) {
+                    match res {
+                        Ok(res) => {
+                            self.rekeningen = res.to_rekening_maps();
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting accounts: {}", e);
+                        }
+                    }
                 }
             }
         }
@@ -288,7 +319,7 @@ impl eframe::App for PenningHelperApp {
                         );
                     }
                     if ui.button("Quit").clicked() {
-                        frame.close();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
 
                     egui::warn_if_debug_build(ui);
@@ -341,7 +372,7 @@ impl eframe::App for PenningHelperApp {
 
 #[derive(Clone, Debug)]
 struct MyTabs {
-    tree: Tree<ContentThing>,
+    dock: DockState<ContentThing>,
 }
 
 impl Default for MyTabs {
@@ -352,14 +383,13 @@ impl Default for MyTabs {
 
 impl MyTabs {
     pub fn new() -> Self {
-        let mut tree = Tree::new(vec![ContentThing::Info]);
-        tree.set_focused_node(NodeIndex::root());
-        Self { tree }
+        let dock = DockState::new(vec![ContentThing::Info]);
+        Self { dock }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, foobar: FooBar) {
         let mut nodes = vec![];
-        egui_dock::DockArea::new(&mut self.tree)
+        egui_dock::DockArea::new(&mut self.dock)
             .style(Style::from_egui(ui.style().as_ref()))
             .show_close_buttons(true)
             .show_add_buttons(true)
@@ -372,10 +402,9 @@ impl MyTabs {
                     foobar,
                 },
             );
-        nodes.drain(..).for_each(|(node, content)| {
-            self.tree.set_focused_node(node);
-            self.tree.push_to_focused_leaf(content)
-        })
+        nodes
+            .drain(..)
+            .for_each(|(_node, content)| self.dock.push_to_focused_leaf(content))
     }
 }
 
@@ -385,6 +414,7 @@ enum ContentThing {
     MemberInfo(MemberInfo),
     TurflistImport(TurflistImport),
     SepaGen(SepaGen),
+    MerchSales(MerchSales),
 }
 
 impl ContentThing {
@@ -394,6 +424,7 @@ impl ContentThing {
             ContentThing::MemberInfo(_) => "Member Info",
             ContentThing::TurflistImport(_) => "Turflist Import",
             ContentThing::SepaGen(_) => "Invoice Generator",
+            ContentThing::MerchSales(_) => "Merch Sales",
         }
     }
 
@@ -403,6 +434,7 @@ impl ContentThing {
             ContentThing::MemberInfo(_) => false,
             ContentThing::TurflistImport(_) => false,
             ContentThing::SepaGen(_) => false,
+            ContentThing::MerchSales(_) => false,
         }
     }
 
@@ -412,6 +444,7 @@ impl ContentThing {
             ContentThing::MemberInfo(mi) => mi.ui(ui, cfg, members),
             ContentThing::TurflistImport(tli) => tli.ui(ui, cfg, members),
             ContentThing::SepaGen(sg) => sg.ui(ui, cfg, members),
+            ContentThing::MerchSales(ms) => ms.ui(ui, cfg, members),
         }
     }
 
@@ -433,8 +466,6 @@ impl InfoTab {
         ui.label("But really as long as you give it an excel file with some specific columns it'll happily work with it.");
         ui.label("It can also be used to generate SEPA files for the bank,");
         ui.label("and can send automated emails to the members that have an open balance to inform them that they have to pay.");
-        egui_extras::RetainedImage::from_color_image("memes", ColorImage::example())
-            .show_max_size(ui, Vec2::new(ui.available_width(), 256.0));
         let errors = foobar.cfg.config_errors();
         if errors.len() > 0 {
             ui.heading("Config Errors:");
@@ -444,904 +475,6 @@ impl InfoTab {
         } else {
             ui.heading("Config is valid");
         }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct MemberInfo {
-    search: String,
-}
-
-impl MemberInfo {
-    pub fn ui(&mut self, ui: &mut Ui, _foobar: &FooBar, members: &Relations) {
-        ui.horizontal(|ui| {
-            ui.label("filter:");
-            ui.text_edit_singleline(&mut self.search);
-        });
-        TableBuilder::new(ui)
-            .column(Column::auto().at_least(50.0))
-            .column(Column::remainder())
-            .column(Column::remainder())
-            .column(Column::remainder())
-            .column(Column::auto().at_least(50.0))
-            .header(20.0, |mut r| {
-                r.col(|ui| {
-                    ui.label("id");
-                });
-                r.col(|ui| {
-                    ui.label("Name");
-                });
-
-                r.col(|ui| {
-                    ui.label("Email");
-                });
-                r.col(|ui| {
-                    ui.label("IBAN");
-                });
-
-                r.col(|ui| {
-                    ui.label("Source");
-                });
-            })
-            .body(|mut b| {
-                for member in members.iter().filter(|m| {
-                    self.search.is_empty()
-                        || m.naam.to_lowercase().contains(&self.search.to_lowercase())
-                }) {
-                    b.row(20.0, |mut r| {
-                        r.col(|ui| {
-                            ui.label(&member.code.to_string());
-                        });
-                        r.col(|ui| {
-                            ui.label(&member.naam);
-                        });
-                        r.col(|ui| {
-                            ui.label(&member.email_address);
-                        });
-                        r.col(|ui| {
-                            ui.label(
-                                &member
-                                    .rekening
-                                    .as_ref()
-                                    .map(|a| a.iban.clone())
-                                    .unwrap_or("".to_string()),
-                            );
-                        });
-                        r.col(|ui| {
-                            ui.label(&member.source);
-                        });
-                    });
-                }
-            });
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct TurflistImport {
-    rekening: String,
-    description: String,
-    reference: String,
-    turflist: Option<TurfList>,
-    matched: Option<MatchedTurflist>,
-    price: Euro,
-    last_len: usize,
-}
-
-impl TurflistImport {
-    pub fn ui(&mut self, ui: &mut Ui, foobar: &mut FooBar, members: &Relations) {
-        // TopBottomPanel::top(ui.next_auto_id()).show(ui.ctx(), |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Rekening");
-            TextEdit::singleline(&mut self.rekening)
-                .hint_text("0000-00")
-                .show(ui);
-        });
-        ui.horizontal(|ui| {
-            ui.label("Description");
-            TextEdit::singleline(&mut self.description)
-                .hint_text("Description")
-                .show(ui);
-        });
-        ui.horizontal(|ui| {
-            ui.label("Reference");
-            TextEdit::singleline(&mut self.reference)
-                .hint_text("T0011-00")
-                .show(ui);
-        });
-        ui.horizontal(|ui| {
-            if ui.button("Open Turflist").clicked() {
-                self.turflist = None;
-                foobar.files.new_receiver(FileReceiverSource::TurfList);
-                self.price = Default::default();
-            };
-            if let Some(list) = foobar.files.get_receiver(FileReceiverSource::TurfList) {
-                // println!("Receiver exists!");
-                match list.get_file() {
-                    FileReceiverResult::File(f) => {
-                        ui.label(format!("File: {:?}", f));
-                        if self.turflist.is_none() {
-                            println!("Turflist was none");
-                            let ext = f.extension().and_then(OsStr::to_str).unwrap_or("");
-                            match ext {
-                                "csv" => {
-                                    ui.label("csv");
-                                    match penning_helper_turflists::csv::read_csv(f) {
-                                        Ok(mut l) => {
-                                            l.shrink();
-                                            self.turflist = Some(l);
-                                            self.matched = None;
-                                        }
-                                        Err(e) => {
-                                            if let Some(s) = ERROR_STUFF.get() {
-                                                s.send(e.to_string()).unwrap();
-                                            }
-                                        }
-                                    }
-                                }
-                                "xlsx" | "xls" => {
-                                    if self.price == (0, 0).into() {
-                                        let res =
-                                            foobar.popups.entry("Price".to_string()).or_insert(
-                                                Popup::new_default::<(String, f64)>("Price"),
-                                            );
-                                        if let Some(v) = res.value::<String>() {
-                                            self.price = v.parse().unwrap_or((0, 0).into());
-                                            foobar.popups.remove("Price");
-                                        }
-                                    } else {
-                                        ui.label(format!("Price: {}", self.price));
-                                        foobar.popups.remove("Price");
-
-                                        match penning_helper_turflists::xlsx::read_excel(
-                                            f, self.price,
-                                        )
-                                        .map(|mut l| {
-                                            l.shrink();
-                                            l
-                                        })
-                                        .map_err(|e| e.to_string())
-                                        {
-                                            Ok(mut o) => {
-                                                o.shrink();
-                                                self.turflist = Some(o);
-                                                self.matched = None;
-                                            }
-                                            Err(e) => {
-                                                if let Some(s) = ERROR_STUFF.get() {
-                                                    s.send(e).unwrap();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    ui.label("Invalid file type");
-                                }
-                            }
-                            // if ext == "csv" {
-                            //     ui.label("CSV");
-                            // } else if ext == "xlsx" {
-                            //     ui.label("Excel");
-
-                            // } else {
-                            //     ui.label("Invalid file type");
-                            // }
-                        }
-                    }
-                    FileReceiverResult::NoFile => {
-                        ui.label("No file selected.");
-                    }
-                    FileReceiverResult::Waiting => {
-                        ui.label("Waiting for file");
-                    }
-                };
-            }
-            if let Some(t) = &self.matched {
-                if ui.button("Append to Conscribo").clicked() {
-                    let transactions = t
-                        .iter()
-                        .flat_map(|m| m.idx().map(|idx| (&members[idx], m.amount)))
-                        .map(|(r, eur)| {
-                            let a =
-                                AddChangeTransaction::new(Date::today(), self.description.clone());
-                            let a = if eur > Euro::default() {
-                                a.add_debet(
-                                    self.rekening.clone(),
-                                    eur,
-                                    self.reference.clone(),
-                                    r.code,
-                                )
-                            } else {
-                                a.add_credit(
-                                    self.rekening.clone(),
-                                    eur,
-                                    self.reference.clone(),
-                                    r.code,
-                                )
-                            };
-                            a
-                        })
-                        .collect::<Vec<_>>();
-                    let res: Option<ConscriboResult<Vec<TransactionResult>>> =
-                        foobar.conscribo.run(|c| c.do_multi_request(transactions));
-                    if let Some(res) = res {
-                        match res {
-                            Ok(o) => {
-                                let mut s = String::new();
-                                for r in o {
-                                    s.push_str(&format!("{:?}\n", r));
-                                }
-                                if let Some(se) = ERROR_STUFF.get() {
-                                    se.send(s).unwrap();
-                                }
-                            }
-                            Err(e) => {
-                                if let Some(s) = ERROR_STUFF.get() {
-                                    s.send(format!("Error: {}", e)).unwrap();
-                                }
-                            }
-                        }
-                    }
-                }
-                if ui.button("Save PDF").clicked() {
-                    let pdf = penning_helper_pdf::generate_turflist_pdf(
-                        &self
-                            .matched
-                            .as_ref()
-                            .unwrap()
-                            .iter()
-                            .map(|m| {
-                                let name = match m.idx() {
-                                    Some(idx) => members[idx].naam.as_str(),
-                                    None => m.name.as_str(),
-                                };
-                                (name, m.row())
-                            })
-                            .collect::<Vec<_>>(),
-                        &self.description,
-                        &self.reference,
-                    );
-                    if let Err(e) = open::that_detached(pdf) {
-                        if let Some(s) = ERROR_STUFF.get() {
-                            s.send(format!("Error: {}", e)).unwrap();
-                        }
-                    }
-                }
-            } else {
-                ui.add_enabled_ui(false, |ui| {
-                    ui.button("Append to Conscribo").changed();
-                    ui.button("Save PDF").clicked();
-                });
-            }
-        });
-        // });
-        // TopBottomPanel::bottom(ui.next_auto_id()).show(ui.ctx(), |ui| {
-        if self
-            .matched
-            .as_ref()
-            .is_some_and(|l| l.iter().any(|r| r.idx().is_none()))
-        {
-            ui.label("The list contains IBANs (aka externals), you need to add these manually to conscribo!");
-        } else {
-            ui.label("");
-        }
-
-        if let Some(o) = &self.turflist {
-            if self.last_len != members.len() || self.matched.is_none() {
-                println!("{} != {}", self.last_len, members.len());
-                let names = members.iter().map(|m| m.naam.clone()).collect::<Vec<_>>();
-                let emails = members
-                    .iter()
-                    .map(|m| m.email_address.clone())
-                    .collect::<Vec<_>>();
-                let mut matches = o.get_matches(&names, &emails);
-                matches.remove_zero_cost();
-                self.matched = Some(matches);
-                self.last_len = members.len();
-            }
-        }
-        // });
-        // CentralPanel::default().show(ui.ctx(), |ui| {
-        TableBuilder::new(ui)
-            .columns(Column::remainder().at_least(50.0), 5)
-            .header(20.0, |mut r| {
-                r.col(|ui| {
-                    ui.strong("Name");
-                });
-                r.col(|ui| {
-                    ui.strong("Original Name");
-                });
-                r.col(|ui| {
-                    ui.strong("Email");
-                });
-                r.col(|ui| {
-                    ui.strong("Amount");
-                });
-                r.col(|ui| {
-                    ui.strong("Is Member or IBAN");
-                });
-            })
-            .body(|mut b| {
-                for row in self.matched.iter().flat_map(|l| l.iter()) {
-                    let (name, email, amount, member) = if let Some(idx) = row.idx() {
-                        let member = &members[idx];
-                        (
-                            member.naam.clone(),
-                            if member.email_address.is_empty() {
-                                row.row().email.clone().unwrap_or_else(|| String::new())
-                            } else {
-                                member.email_address.clone()
-                            },
-                            row.amount,
-                            Some(member),
-                        )
-                    } else {
-                        (
-                            row.name.clone(),
-                            row.email.clone().unwrap_or_else(|| String::new()),
-                            row.amount,
-                            None,
-                        )
-                    };
-
-                    b.row(20.0, |mut r| {
-                        r.col(|ui| {
-                            let mut s = name.as_str();
-                            let t = TextEdit::singleline(&mut s);
-                            if member.is_none() {
-                                t.text_color(ui.visuals().warn_fg_color)
-                            } else {
-                                t
-                            }
-                            .show(ui);
-                        });
-                        r.col(|ui| {
-                            ui.label(&row.name);
-                        });
-                        r.col(|ui| {
-                            let mut s = email.as_str();
-                            ui.text_edit_singleline(&mut s);
-                        });
-                        r.col(|ui| {
-                            ui.label(amount.to_string());
-                        });
-                        r.col(|ui| {
-                            if member.is_some() {
-                                ui.label("Member");
-                            } else {
-                                let mut iban = row.iban.as_ref().map(String::as_str).unwrap_or("");
-                                ui.text_edit_singleline(&mut iban);
-                            }
-                        });
-                    });
-                }
-            });
-        // });
-    }
-}
-
-#[derive(Clone, Debug)]
-struct RelationTransaction {
-    t: Vec<UnifiedTransaction>,
-    name: String,
-    code: u32,
-    membership_date: Date,
-    iban: String,
-    bic: String,
-    email: String,
-}
-
-impl RelationTransaction {
-    pub fn total_cost(&self) -> Euro {
-        self.t.iter().map(|t| t.cost).sum()
-    }
-
-    pub fn all_after(&self, date: Date) -> impl Iterator<Item = &UnifiedTransaction> {
-        self.t.iter().filter(move |t| t.date >= date)
-    }
-
-    pub fn previous_invoices_left(&self, date: Date) -> Euro {
-        self.t
-            .iter()
-            .filter(|t| t.date < date)
-            .map(|t| t.cost)
-            .sum()
-    }
-
-    fn is_valid(&self) -> bool {
-        !self.iban.is_empty() && !self.bic.is_empty() && !self.email.is_empty()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-enum SendMode {
-    #[default]
-    Test,
-    Real,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Show {
-    #[default]
-    All,
-    OwesUsALot,
-    IsOwedByUs,
-}
-
-impl Show {
-    fn filter(&self, t: &RelationTransaction) -> bool {
-        match self {
-            Show::All => true,
-            Show::OwesUsALot => t.total_cost() > Euro::from(100),
-            Show::IsOwedByUs => t.total_cost() < Euro::from(-10),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct SepaGen {
-    transactions: Vec<RelationTransaction>,
-    unifieds: Vec<UnifiedTransaction>,
-    unifieds_grabbed: bool,
-    sorted: bool,
-    idx: usize,
-    done: bool,
-    send_mode: SendMode,
-    to_send: Vec<RelationTransaction>,
-    last_send: TimeThing,
-    email_client: Option<MailServer>,
-    has_tried_mail: bool,
-    last_invoice_date: Date,
-    show: Show,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-struct TimeThing(Instant);
-
-impl TimeThing {
-    pub fn now() -> Self {
-        Self(Instant::now())
-    }
-}
-
-impl Default for TimeThing {
-    fn default() -> Self {
-        Self(
-            Instant::now()
-                .checked_sub(Duration::from_secs(100 * 60))
-                .unwrap_or_else(|| Instant::now()),
-        )
-    }
-}
-
-impl Deref for TimeThing {
-    type Target = Instant;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Add<Duration> for TimeThing {
-    type Output = Self;
-
-    fn add(self, rhs: Duration) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-
-impl PartialEq<Instant> for TimeThing {
-    fn eq(&self, other: &Instant) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialOrd<Instant> for TimeThing {
-    fn partial_cmp(&self, other: &Instant) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
-
-impl SepaGen {
-    fn ui(&mut self, ui: &mut Ui, foobar: &mut FooBar, members: &Relations) {
-        if !self.has_tried_mail {
-            self.has_tried_mail = true;
-            self.email_client = MailServer::new(foobar.cfg.mail(), foobar.cfg.sepa()).ok();
-        }
-        let done = if !self.unifieds_grabbed {
-            ui.label(format!("Getting transactions{}", ".".repeat(self.idx / 50)));
-            ui.label("This will take a while the first time");
-            self.idx += 1;
-            self.idx %= 200;
-
-            let cache_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
-            let cache_dir = cache_dir.join("penning-helper");
-            std::fs::create_dir_all(&cache_dir).unwrap();
-            let cache = cache_dir.join("cache.json");
-
-            let r = foobar
-                .conscribo
-                .run(|c| c.get_transactions(&cache))
-                .transpose()
-                .map(Option::flatten);
-            ui.ctx().request_repaint();
-            match r {
-                Ok(r) => {
-                    if let Some(r) = r {
-                        self.unifieds_grabbed = true;
-                        self.unifieds = r;
-                    }
-                }
-                Err(e) => {
-                    if let Some(s) = ERROR_STUFF.get() {
-                        s.send(format!("Error: {}", e)).unwrap();
-                    }
-                }
-            }
-            false
-        } else if !self.unifieds.is_empty() {
-            ui.label("Calculating, numbers will change for a bit");
-            ui.ctx().request_repaint();
-            for _ in 0..min(self.unifieds.len(), 1000) {
-                let t = self.unifieds.remove(0);
-
-                let Some(rel) = members.find_member(t.code) else {
-                    println!("No relation found for {}", t.code);
-                    continue;
-                };
-                if rel.no_invoice {
-                    continue;
-                }
-                let name = rel.naam.as_str();
-                let iban = rel
-                    .rekening
-                    .as_ref()
-                    .map(|r| r.iban.as_str())
-                    .unwrap_or_default();
-                let bic = rel
-                    .rekening
-                    .as_ref()
-                    .map(|r| r.bic.as_str())
-                    .unwrap_or_default();
-                let email = rel.email_address.as_str();
-                let membership_date = rel.membership_started.unwrap_or_else(|| Date::today());
-                let code = rel.code;
-
-                if let Some(r) = self
-                    .transactions
-                    .iter_mut()
-                    .find(|t| t.name == name && t.iban == iban && t.email == email)
-                {
-                    r.t.push(t)
-                } else {
-                    self.transactions.push(RelationTransaction {
-                        t: vec![t],
-                        name: name.to_string(),
-                        iban: iban.to_string(),
-                        bic: bic.to_string(),
-                        email: email.to_string(),
-                        code,
-                        membership_date,
-                    });
-                }
-            }
-            false
-        } else if !self.sorted {
-            let mut transactions = vec![];
-
-            for t in self.transactions.clone() {
-                if t.total_cost() == Euro::default() {
-                    continue;
-                }
-                if t.email.is_empty() {
-                    println!("No email for {}", t.name);
-                    continue;
-                }
-
-                transactions.push(t);
-            }
-
-            transactions.sort_by_cached_key(|t| t.name.clone());
-
-            self.transactions = transactions;
-            self.sorted = true;
-            false
-        } else {
-            ui.label("Done calculating");
-            true
-        };
-        ui.add_enabled_ui(done, |ui| {
-            if ui.button("Create SEPA file").clicked() {
-                foobar.files.new_receiver(FileReceiverSource::SepaSaveLoc);
-                self.done = false;
-            }
-            if let Some(r) = foobar.files.get_receiver(FileReceiverSource::SepaSaveLoc) {
-                match r.get_file() {
-                    FileReceiverResult::File(f) => {
-                        ui.label(format!("File: {:?}", f));
-                        if !self.done {
-                            let mut creditors = vec![];
-                            let mut debtors = vec![];
-                            for t in self
-                                .transactions
-                                .iter()
-                                .filter(|t| t.total_cost() != Euro::default())
-                                .filter(|t| t.is_valid())
-                                .filter(|t| self.show.filter(t))
-                            {
-                                let total = t.total_cost();
-                                if total < Euro::default() {
-                                    // it's a creditor
-                                    let c = foobar.sepa.new_creditor(
-                                        -total,
-                                        t.name.clone(),
-                                        t.bic.clone(),
-                                        t.iban.clone(),
-                                        "Payment of positive balance".to_string(),
-                                    );
-                                    creditors.push(c);
-                                } else if total > Euro::default() {
-                                    // it's a debtor
-                                    let d = if total >= 100.into() {
-                                        let total = 99.99.into();
-                                        foobar.sepa.new_debtor(
-                                            total,
-                                            t.name.clone(),
-                                            t.bic.clone(),
-                                            t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
-                                            "Partial invoice of open AEGEE-Delft balance"
-                                                .to_string(),
-                                        )
-                                    } else {
-                                        foobar.sepa.new_debtor(
-                                            total,
-                                            t.name.clone(),
-                                            t.bic.clone(),
-                                            t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
-                                            "Invoice of open AEGEE-Delft balance".to_string(),
-                                        )
-                                    };
-                                    debtors.push(d);
-                                } else {
-                                    // nothing
-                                }
-                            }
-                            let debtors = foobar
-                                .sepa
-                                .new_invoice_payment_information(Date::in_some_days(3), debtors);
-                            let creditors = foobar
-                                .sepa
-                                .new_transfer_payment_information(Date::in_some_days(6), creditors);
-                            let debtors = foobar.sepa.new_invoice_document(debtors);
-                            let creditors = foobar.sepa.new_transfer_document(creditors);
-
-                            let mut debtors_file = f.to_path_buf();
-                            debtors_file.set_extension("invoice.xml");
-                            let debtors_file = File::create(debtors_file).unwrap();
-                            debtors.write(debtors_file).unwrap();
-
-                            let mut creditors_file = f.to_path_buf();
-                            creditors_file.set_extension("transfer.xml");
-                            let creditors_file = File::create(creditors_file).unwrap();
-                            creditors.write(creditors_file).unwrap();
-                            self.done = true;
-                        }
-                    }
-                    FileReceiverResult::NoFile => {
-                        ui.label("No file selected.");
-                    }
-                    FileReceiverResult::Waiting => {
-                        ui.label("Waiting for file");
-                    }
-                }
-            }
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut self.send_mode, SendMode::Test, "Test")
-                    .on_hover_text("Send the emails to the test email address");
-                if ui
-                    .radio_value(&mut self.send_mode, SendMode::Real, "Real")
-                    .on_hover_text("Send the emails to the real email addresses")
-                    .clicked()
-                    && !matches!(self.send_mode, SendMode::Real)
-                {
-                    foobar.popups.insert(
-                        "SEPAShouldChange".to_string(),
-                        Popup::new_default::<bool>(
-                            "Are you sure you want to send the mail to the real email addresses?",
-                        ),
-                    );
-                    self.send_mode = SendMode::Test;
-                }
-                ui.add(egui_extras::DatePickerButton::new(
-                    self.last_invoice_date.deref_mut(),
-                ));
-                if let Some(res) = foobar.popups.get("SEPAShouldChange") {
-                    if let Some(v) = res.value::<bool>() {
-                        if *v {
-                            self.send_mode = SendMode::Real;
-                        } else {
-                            self.send_mode = SendMode::Test;
-                        }
-                        foobar.popups.remove("SEPAShouldChange");
-                    }
-                }
-                if ui.button("Send Emails").clicked() {
-                    match self.send_mode {
-                        SendMode::Test => {
-                            self.to_send = self
-                                .transactions
-                                .iter()
-                                .filter(|t| t.total_cost() != Euro::default())
-                                .take(1)
-                                .cloned()
-                                .filter(|t| self.show.filter(t))
-                                .collect();
-                        }
-                        SendMode::Real => {
-                            self.to_send = self
-                                .transactions
-                                .iter()
-                                .filter(|t| t.total_cost() != Euro::default())
-                                .cloned()
-                                .filter(|t| self.show.filter(t))
-                                .collect()
-                        }
-                    }
-                }
-
-                ui.collapsing("Filter", |ui| {
-                    ui.vertical(|ui| {
-                        ui.radio_value(&mut self.show, Show::All, "All");
-                        ui.radio_value(
-                            &mut self.show,
-                            Show::OwesUsALot,
-                            "Owes us more than 100 euros",
-                        );
-                        ui.radio_value(
-                            &mut self.show,
-                            Show::IsOwedByUs,
-                            "We owe them more than 10 euros",
-                        );
-                    })
-                });
-                if let Some(mail_client) = &self.email_client {
-                    if !self.to_send.is_empty()
-                        && (self.last_send + Duration::from_secs(5 * 60)) <= Instant::now()
-                    {
-                        self.last_send = TimeThing::now();
-                        println!("Sending emails");
-                        let today = Date::today();
-                        for r in self.to_send.drain(0..(20.min(self.to_send.len()))) {
-                            if r.email.is_empty() {
-                                println!("No email for {}", r.name);
-                                continue;
-                            }
-                            let total = r.total_cost();
-
-                            let pdf = Self::get_pdf(self.last_invoice_date, &r);
-
-                            let email_address = if matches!(self.send_mode, SendMode::Test) {
-                                "test@asraphiel.dev"
-                            } else {
-                                r.email.as_str()
-                            };
-                            println!(
-                                "Sending email for {} to {}, with total {}",
-                                r.name, email_address, total
-                            );
-                            if let Err(e) = mail_client.send_mail(
-                                &r.name,
-                                email_address,
-                                pdf,
-                                total,
-                                today,
-                                r.iban.is_empty() || r.bic.is_empty(),
-                            ) {
-                                if let Some(s) = ERROR_STUFF.get() {
-                                    s.send(format!("Error sending mail: {}", e)).unwrap();
-                                }
-                            }
-                        }
-                        ui.ctx().request_repaint_after(Duration::from_secs(1));
-                        self.last_send = TimeThing::now();
-                    } else {
-                        ui.label(format!(
-                            "Waiting, {} emails remaining, {} time remaning",
-                            self.to_send.len(),
-                            (self.last_send + Duration::from_secs(5 * 60))
-                                .duration_since(Instant::now())
-                                .as_secs()
-                        ));
-                        ui.ctx().request_repaint_after(Duration::from_secs(1));
-                    }
-                } else {
-                    ui.label("Mail machine broke :(");
-                }
-            });
-        });
-
-        TableBuilder::new(ui)
-            .columns(Column::remainder(), 3)
-            .header(20.0, |mut r| {
-                r.col(|ui| {
-                    ui.label("Name");
-                });
-                r.col(|ui| {
-                    ui.label("Amount");
-                });
-                r.col(|ui| {
-                    ui.label("Get PDF");
-                });
-            })
-            .body(|mut b| {
-                for t in self
-                    .transactions
-                    .iter()
-                    .filter(|t| t.total_cost() != Euro::default())
-                    .filter(|t| self.show.filter(t))
-                {
-                    let amount = t.total_cost();
-                    b.row(20.0, |mut r| {
-                        r.col(|ui| {
-                            let text = RichText::new(&t.name);
-                            let text = if amount > Euro::from(100) {
-                                text.color(ui.visuals().warn_fg_color)
-                            } else if !t.is_valid() {
-                                text.color(ui.visuals().error_fg_color)
-                            } else {
-                                text
-                            };
-                            ui.label(text);
-                        });
-                        r.col(|ui| {
-                            let text = RichText::new(amount.to_string());
-                            let text = if amount > Euro::from(100) {
-                                text.color(ui.visuals().warn_fg_color)
-                            } else if !t.is_valid() {
-                                text.color(ui.visuals().error_fg_color)
-                            } else {
-                                text
-                            };
-                            ui.label(text);
-                        });
-                        r.col(|ui| {
-                            if ui.button("Open PDF").clicked() {
-                                let pdf = Self::get_pdf(self.last_invoice_date, t);
-                                let mut temp_file = std::env::temp_dir();
-                                let mut rng = rand::thread_rng();
-                                let random_name: String = std::iter::repeat(())
-                                    .map(|()| rng.sample(rand::distributions::Alphanumeric) as char)
-                                    .take(10)
-                                    .collect();
-                                temp_file.push(random_name);
-                                temp_file.set_extension("pdf");
-                                let mut f = File::create(&temp_file).unwrap();
-                                f.write_all(&pdf).unwrap();
-                                open::that_detached(temp_file).unwrap();
-                            }
-                        });
-                    });
-                }
-            });
-    }
-
-    fn get_pdf(last_invoice_date: Date, r: &RelationTransaction) -> Vec<u8> {
-        let previous = r.previous_invoices_left(last_invoice_date);
-        let t = UnifiedTransaction::create_new_mock(
-            last_invoice_date,
-            "Open costs of previous invoice".to_string(),
-            previous,
-        );
-        let to_show = r.all_after(last_invoice_date);
-        let t = std::iter::once(&t)
-            .chain(to_show)
-            .map(|t| penning_helper_pdf::SimpleTransaction::new(t.cost, &t.description, t.date))
-            .collect::<Vec<_>>();
-        penning_helper_pdf::create_invoice_pdf(t, &r.name)
     }
 }
 
@@ -1358,7 +491,7 @@ impl<'a> egui_dock::TabViewer for TabViewer<'a> {
         tab.show(ui, &mut self.foobar, self.members);
     }
 
-    fn add_popup(&mut self, ui: &mut egui::Ui, node: NodeIndex) {
+    fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, node: NodeIndex) {
         ui.vertical(|ui| {
             ui.set_min_width(128.0);
             if ui.button("Member Info").clicked() {
@@ -1374,6 +507,10 @@ impl<'a> egui_dock::TabViewer for TabViewer<'a> {
             if ui.button("Generate Invoice").clicked() {
                 self.added_nodes
                     .push((node, ContentThing::SepaGen(Default::default())));
+            }
+            if ui.button("Merch Sales").clicked() {
+                self.added_nodes
+                    .push((node, ContentThing::MerchSales(Default::default())));
             }
         });
     }

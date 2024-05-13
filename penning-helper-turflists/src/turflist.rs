@@ -32,7 +32,7 @@ impl TurfList {
                 new_rows.push(row);
             }
         }
-        new_rows.retain_mut(|e| e.name != "" && e.name.to_lowercase() != "compass");
+        new_rows.retain_mut(|e| e.name != "");
         new_rows.sort_by_key(|r| r.amount);
         new_rows.reverse();
         self.rows = new_rows;

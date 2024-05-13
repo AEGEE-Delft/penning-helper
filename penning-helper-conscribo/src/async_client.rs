@@ -5,8 +5,8 @@ use serde::de::DeserializeOwned;
 
 use crate::{
     Cache, ConscriboMultiRequest, ConscriboResult, Field, FieldReq, FieldRes, ListRelations,
-    ListTransactions, LoginRequest, LoginResult, MultiRootResult, Relation, Relations, RootResult,
-    ToRequest, TransactionFilter, Transactions, UnifiedTransaction, VERSION,
+    ListTransactions, LoginRequest, LoginResult, Member, MultiRootResult, NonMember, RelationType,
+    Relations, RootResult, ToRequest, TransactionFilter, Transactions, UnifiedTransaction, VERSION,
 };
 
 pub struct ConscriboClient {
@@ -103,26 +103,12 @@ impl ConscriboClient {
         Ok(res.fields)
     }
 
-    pub async fn get_relations(
-        &self,
-        entity_type: impl ToString,
-    ) -> ConscriboResult<Vec<Relation>> {
-        let et = entity_type.to_string();
-        let req = ListRelations::new(
-            et.clone(),
-            vec![
-                "code".to_string(),
-                "naam".to_string(),
-                "email".to_string(),
-                "rekening".to_string(),
-                "membership_started".to_string(),
-                "geen_invoice".to_string(),
-            ],
-        );
-        let res: Relations = self.do_request(req).await?;
+    pub async fn get_relations<R: RelationType>(&self) -> ConscriboResult<Vec<R>> {
+        let req: ListRelations<R> = ListRelations::new(R::ENTITY_TYPE, R::fields());
+        let res: Relations<R> = self.do_request(req).await?;
 
-        let mut res: Vec<Relation> = res.into();
-        res.iter_mut().for_each(|r| r.source = et.clone());
+        let mut res: Vec<R> = res.into();
+
         // res.iter_mut().for_each(|r| r.naam = format!("{} ({})", r.naam, r.code));
 
         Ok(res)
@@ -141,11 +127,11 @@ impl ConscriboClient {
             Cache::default()
         };
 
-        let mensen = self.get_relations("lid").await?;
-        let onbekend = self.get_relations("onbekend").await?;
+        let mensen = self.get_relations::<Member>().await?;
+        let onbekend = self.get_relations::<NonMember>().await?;
         let mensen = mensen
             .into_iter()
-            .chain(onbekend.into_iter())
+            .chain(onbekend.into_iter().map(|o| o.into()))
             .collect::<Vec<_>>();
         let codes = mensen.iter().map(|m| m.code.clone()).collect::<Vec<_>>();
         let req = ListTransactions::new(vec![

@@ -10,7 +10,7 @@ use penning_helper_types::{Date, Euro};
 
 mod turflist;
 
-pub use turflist::generate_turflist_pdf;
+pub use turflist::{generate_turflist_pdf, SimpleTurfRow};
 
 const FONTS: [&[u8]; 4] = [
     include_bytes!("../../fonts/Roboto-Regular.ttf"),
