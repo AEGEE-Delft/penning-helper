@@ -44,7 +44,7 @@ mod filters {
     }
 
     pub fn too_much_result(e: &Euro) -> ::askama::Result<String> {
-        Ok(format!("{:-}", *e - 99.99))
+        Ok(format!("{:-}", *e - 100.0))
     }
 
     pub fn owes_or_not(e: &Euro) -> ::askama::Result<bool> {

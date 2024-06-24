@@ -7,7 +7,7 @@ use penning_helper_types::{Date, Euro};
 
 use crate::{rekening_selector::Selector, ERROR_STUFF};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct Row {
     price_text: String,
     price: Option<Euro>,
@@ -15,6 +15,23 @@ struct Row {
     total_price: Option<Euro>,
     member_name_selector: Selector<u32>,
     rekening_selector: Selector<String>,
+    count: usize,
+    count_text: String,
+}
+
+impl Default for Row {
+    fn default() -> Self {
+        Self {
+            price_text: Default::default(),
+            price: Default::default(),
+            total_price_text: Default::default(),
+            total_price: Default::default(),
+            member_name_selector: Default::default(),
+            rekening_selector: Default::default(),
+            count: 1,
+            count_text: String::from("1"),
+        }
+    }
 }
 
 impl<'r> From<&'r Row> for SimpleTurfRow<'r> {
@@ -28,7 +45,7 @@ impl<'r> From<&'r Row> for SimpleTurfRow<'r> {
                 .map(|(l, _)| l)
                 .unwrap_or(value.rekening_selector.as_str())
         };
-        let amount = value.total_price.unwrap_or_default();
+        let amount = value.total_price.unwrap_or_default() * value.count;
 
         Self::new(name, what, amount)
     }
@@ -46,7 +63,7 @@ impl Row {
                         .and_then(|p| self.total_price.map(|t| (r, *m, p, t)))
                 })
             })
-            .map(|(r, m, p, t)| (r, *m, p, t))
+            .map(|(r, m, p, t)| (r, *m, p * self.count as f64, t * self.count as f64))
     }
 }
 
@@ -171,7 +188,7 @@ impl MerchSales {
         TableBuilder::new(ui)
             .auto_shrink([true, false])
             .striped(true)
-            .columns(Column::remainder(), 10)
+            .columns(Column::remainder(), 11)
             .header(20.0, |mut r| {
                 r.col(|ui| {
                     ui.label("Name");
@@ -199,6 +216,9 @@ impl MerchSales {
                 });
                 r.col(|ui| {
                     ui.label("Winst");
+                });
+                r.col(|ui| {
+                    ui.label("Hoe veel keer");
                 });
                 r.col(|ui| {
                     ui.label("Delete");
@@ -286,7 +306,7 @@ impl MerchSales {
 
                         r.col(|ui| {
                             if let Some(price) = row.price {
-                                ui.label(format!("{}", price));
+                                ui.label(format!("{}", price * row.count));
                             } else {
                                 ui.label("-");
                             }
@@ -315,7 +335,7 @@ impl MerchSales {
 
                         r.col(|ui| {
                             if let Some(price) = row.total_price {
-                                ui.label(format!("{}", price));
+                                ui.label(format!("{}", price * row.count));
                             } else {
                                 ui.label("-");
                             }
@@ -326,10 +346,26 @@ impl MerchSales {
                                 .as_ref()
                                 .and_then(|p| row.total_price.as_ref().map(|t| (*p, *t)))
                             {
-                                ui.label(format!("{}", total_price - price));
+                                ui.label(format!("{}", (total_price - price) * row.count));
                             } else {
                                 ui.label("-");
                             }
+                        });
+                        r.col(|ui| {
+                            let color = if let Ok(c) = row.count_text.parse::<usize>() {
+                                row.count = c;
+                                Some(egui::Color32::GREEN)
+                            } else {
+                                row.count = 1;
+                                Some(egui::Color32::RED)
+                            };
+
+                            let res = ui.add(
+                                TextEdit::singleline(&mut row.count_text)
+                                    .hint_text("1")
+                                    .text_color_opt(color),
+                            );
+                            ui.memory_mut(|m| m.interested_in_focus(res.id));
                         });
                         r.col(|ui| {
                             if ui.button("Delete").clicked() {

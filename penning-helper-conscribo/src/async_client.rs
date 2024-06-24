@@ -107,7 +107,7 @@ impl ConscriboClient {
         let req: ListRelations<R> = ListRelations::new(R::ENTITY_TYPE, R::fields());
         let res: Relations<R> = self.do_request(req).await?;
 
-        let mut res: Vec<R> = res.into();
+        let res: Vec<R> = res.into();
 
         // res.iter_mut().for_each(|r| r.naam = format!("{} ({})", r.naam, r.code));
 

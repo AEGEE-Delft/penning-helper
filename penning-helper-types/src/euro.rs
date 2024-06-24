@@ -183,6 +183,14 @@ impl Mul<f64> for Euro {
     }
 }
 
+impl Mul<usize> for Euro {
+    type Output = Euro;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        Euro(self.0 * rhs as f64).round()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Euro;

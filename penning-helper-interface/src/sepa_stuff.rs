@@ -333,7 +333,7 @@ impl SepaGen {
                                             "Contributie".to_string(),
                                         )
                                     } else if total >= 100.into() {
-                                        let total = 99.99.into();
+                                        let total = 100.into();
                                         foobar.sepa.new_debtor(
                                             total,
                                             t.name.clone(),
@@ -362,10 +362,10 @@ impl SepaGen {
                             }
                             let debtors = foobar
                                 .sepa
-                                .new_invoice_payment_information(Date::in_some_days(3), debtors);
+                                .new_invoice_payment_information(Date::in_some_days(2), debtors);
                             let creditors = foobar
                                 .sepa
-                                .new_transfer_payment_information(Date::in_some_days(6), creditors);
+                                .new_transfer_payment_information(Date::in_some_days(2), creditors);
                             let debtors = foobar.sepa.new_invoice_document(debtors);
                             let creditors = foobar.sepa.new_transfer_document(creditors);
 

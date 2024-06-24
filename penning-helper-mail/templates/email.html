@@ -21,7 +21,7 @@
             {% else %}
                 {% if amount|too_large %}
                     <p>This amount is too large to automatically deduct completely.</p>
-                    <p>Instead of deducting the full amount €99.99 will be deducted automatically in the coming days.</p>
+                    <p>Instead of deducting the full amount €100 will be deducted automatically in the coming days.</p>
                     <p>Please transfer the remaning {{amount|too_much_result}} to {{company_iban}} in name of {{company_name}}.</p>
                 {% else %}
                     <p>This amount will be automatically deducted from your bank account in the coming days.</p>
