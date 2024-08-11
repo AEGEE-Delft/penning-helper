@@ -110,7 +110,6 @@ impl<'de> Deserialize<'de> for Euro {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let s = s.replace('.', "").replace(',', ".");
         let r = s.parse::<f64>().map_err(serde::de::Error::custom)?;
         Ok(Euro(r))
     }
@@ -122,7 +121,6 @@ impl Serialize for Euro {
         S: serde::Serializer,
     {
         format!("{:0.02}", self.0)
-            .replace('.', ",")
             .serialize(serializer)
     }
 }

@@ -1,271 +1,142 @@
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    path::Path,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use response::ApiResponse;
+use serde::{de::DeserializeOwned, Serialize};
+use session::Credentials;
 
-mod error;
-pub use error::*;
-mod requests;
-pub use requests::*;
+pub mod response;
 
-mod results;
-pub use results::*;
-mod async_client;
-pub use async_client::ConscriboClient as AsyncConscriboClient;
+pub mod entity_types;
 
-use penning_helper_types::Date;
+pub mod session;
 
-const VERSION: &str = "0.20161212";
+pub mod multirequest;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoginResult {
-    session_id: String,
-}
+pub mod field_definitions;
 
-#[derive(Debug, Clone)]
-pub struct ConscriboClient {
-    client: reqwest::blocking::Client,
-    session_id: String,
-    url: String,
-    transactions: Arc<RwLock<Option<Vec<UnifiedTransaction>>>>,
-    getting_transactions: RefCell<bool>,
-}
+pub mod entities;
 
-pub trait RelationType: Serialize + DeserializeOwned {
-    const ENTITY_TYPE: &'static str;
+pub mod accounts;
 
-    fn entity_type() -> &'static str {
-        Self::ENTITY_TYPE
+pub mod transactions;
+
+pub mod add_invoice;
+
+const VERSION: &'static str = "1.20240610";
+
+pub trait ApiCall: Serialize {
+    type Response: DeserializeOwned + Default;
+    const PATH: &'static str;
+    const METHOD: reqwest::Method;
+
+    #[deprecated = "Prefer ConscriboClient::execute"]
+    fn call(&self, client: &ConscriboClient) -> Result<ApiResponse<Self::Response>, RequestError> {
+        let url = format!(
+            "https://api.secure.conscribo.nl/{}/{}/{}",
+            client.account_name,
+            Self::PATH,
+            self.path_params().join("/"),
+        );
+        // let mut request = client.client.post(&url).header("X-Conscribo-API-Version", VERSION);
+        let mut request = client
+            .client
+            .request(Self::METHOD, &url)
+            .header("X-Conscribo-API-Version", VERSION);
+        if let Some(session_id) = client.session_id.read().unwrap().as_ref() {
+            request = request.header("X-Conscribo-SessionId", session_id);
+        }
+        // let response = request.json(self).send().unwrap();
+        if Self::METHOD == reqwest::Method::GET {
+            request = request.query(self);
+        } else {
+            request = request.json(self);
+        }
+        let response = request.send()?;
+        // let response = response.json::<ApiResponse<Self::Response>>()?;
+        let response_text = response.text()?;
+        // println!("{}", response_text);
+        // let now = SystemTime::now()
+        //     .duration_since(SystemTime::UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_millis();
+        // std::fs::write(format!("./hidden/{}.json", now), &response_text).unwrap();
+        let response = serde_json::from_str(&response_text)?;
+
+        Ok(response)
     }
 
-    fn fields() -> Vec<&'static str>;
+    fn path_params(&self) -> Vec<&str> {
+        vec![]
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[error("Request error: {0}")]
+    RequestError(#[from] reqwest::Error),
+    #[error("Serde error: {0}")]
+    SerdeError(#[from] serde_json::Error),
+}
+
+pub struct ConscriboClient {
+    account_name: String,
+    credentials: Option<Credentials>,
+    session_id: Arc<RwLock<Option<String>>>,
+    client: reqwest::blocking::Client,
 }
 
 impl ConscriboClient {
-    pub fn new(
-        username: impl ToString,
-        password: impl ToString,
-        url: impl ToString,
-    ) -> ConscriboResult<Self> {
-        let url = url.to_string();
-        let client = reqwest::blocking::ClientBuilder::new()
-            .timeout(None)
-            .build()?;
-
-        let login_request =
-            LoginRequest::new(username.to_string(), password.to_string()).to_request();
-        let res = client
-            .post(&url)
-            .header("X-Conscribo-API-Version", VERSION)
-            .json(&login_request)
-            .send()?;
-
-        let res = res.json::<RootResult<LoginResult>>()?;
-        let res = res.to_result()?;
-        Ok(Self {
-            client,
-            session_id: res.session_id,
-            url,
-            transactions: Default::default(),
-            getting_transactions: Default::default(),
-        })
-    }
-
-    pub fn new_from_cfg(cfg: &penning_helper_config::ConscriboConfig) -> ConscriboResult<Self> {
-        Self::new(&cfg.username, &cfg.password, &cfg.url)
-    }
-
-    pub fn do_request<A: ToRequest>(&self, req: A) -> ConscriboResult<A::Response> {
-        let t = self.do_request_str(req)?;
-        // println!("{}", t);
-        let value: RootResult<A::Response> = serde_json::from_str(&t)?;
-        value.to_result()
-    }
-
-    fn do_request_str<A: ToRequest>(&self, req: A) -> ConscriboResult<String> {
-        let req = req.to_request();
-        // let command = req.get_command();
-        let t = self
-            .client
-            .post(&self.url)
-            .header("X-Conscribo-API-Version", VERSION)
-            .header("X-Conscribo-SessionId", &self.session_id)
-            .json(&req)
-            .send()?
-            .text()?;
-        Ok(t)
-    }
-
-    pub fn do_multi_request<A: ToRequest>(
-        &self,
-        reqs: Vec<A>,
-    ) -> ConscriboResult<Vec<A::Response>> {
-        let multi_req = ConscriboMultiRequest::new(reqs);
-        let t = self
-            .client
-            .post(&self.url)
-            .header("X-Conscribo-API-Version", VERSION)
-            .header("X-Conscribo-SessionId", &self.session_id)
-            .json(&multi_req)
-            .send()?
-            .text()?;
-        // println!("{}", t);
-        let value: MultiRootResult<A::Response> = serde_json::from_str(&t)?;
-        value.into()
-    }
-
-    pub fn get_field_definitions(&self, entity_type: impl ToString) -> ConscriboResult<Vec<Field>> {
-        let req = FieldReq::new(entity_type.to_string());
-        let res: FieldRes = self.do_request(req)?;
-        Ok(res.fields)
-    }
-
-    pub fn get_relations<'a, R: 'a + RelationType>(&self) -> ConscriboResult<Vec<R>> {
-        // {
-        //     if let Ok(f) =
-        //         std::fs::File::open(format!("relations_{}.json", entity_type.to_string()))
-        //     {
-        //         let res: Relations = serde_json::from_reader(f)?;
-        //         return Ok(res.into());
-        //     }
-        // }
-        let fields = R::fields();
-        // let mut fields = vec![
-        //     "code".to_string(),
-        //     "weergavenaam".to_string(),
-        //     "email".to_string(),
-        //     "rekening".to_string(),
-        //     "membership_started".to_string(),
-        //     "geen_invoice".to_string(),
-        // ];
-        // if et == "lid" {
-        //     fields.push("alumni_lidmaatschap_gestart".to_string());
-        //     fields.push("alumni_lidmaatschap_be__indigt".to_string());
-        //     fields.push("alumni_contributie".to_string());
-        // }
-        let req = ListRelations::new(R::ENTITY_TYPE.to_string(), fields);
-        let res: Relations<R> = self.do_request(req)?;
-
-        let res: Vec<R> = res.into();
-        // res.iter_mut().for_each(|r| r.naam = format!("{} ({})", r.naam, r.code));
-
-        Ok(res)
-    }
-
-    pub fn update_relations(
-        &self,
-        relations: Vec<UpdateRelation>,
-    ) -> ConscriboResult<Vec<ReplaceRelationsResult>> {
-        let r: Vec<ReplaceRelationsResult> = self.do_multi_request(relations)?;
-        Ok(r)
-    }
-
-    pub fn get_transactions(
-        &self,
-        cache_path: &Path,
-    ) -> ConscriboResult<Option<Vec<UnifiedTransaction>>> {
-        let running = { *self.getting_transactions.borrow() };
-        if running {
-            let t = { self.transactions.read().unwrap().clone() };
-            return Ok(t);
-        }
-        let cache_path = cache_path.to_path_buf();
-        let cache = if let Ok(mut f) = std::fs::File::open(&cache_path) {
-            let cache: Cache = serde_json::from_reader(&mut f)?;
-
-            cache
-        } else {
-            Cache::default()
-        };
-        *self.getting_transactions.borrow_mut() = true;
-        let mensen: Vec<Member> = self.get_relations()?;
-        let onbekend: Vec<NonMember> = self.get_relations()?;
-        let mensen = mensen
-            .into_iter()
-            .chain(onbekend.into_iter().map(|m| m.into()))
-            .collect::<Vec<_>>();
-        let codes = mensen.iter().map(|m| m.code.clone()).collect::<Vec<_>>();
-        let req = ListTransactions::new(vec![
-            TransactionFilter::relations(codes),
-            TransactionFilter::DateStart(cache.last_date),
-        ]);
-        let client = self.client.clone();
-        let sesh = self.session_id.clone();
-        let url = self.url.clone();
-        let req = req.to_request();
-
-        let lock = self.transactions.clone();
-
-        std::thread::Builder::new()
-            .name("Transaction gatherer 9000".to_string())
-            .spawn(move || {
-                let cache = cache;
-                println!("Getting transactions");
-                let r = client
-                    .post(&url)
-                    .header("X-Conscribo-API-Version", VERSION)
-                    .header("X-Conscribo-SessionId", &sesh)
-                    .json(&req)
-                    .send()
-                    .unwrap()
-                    .text()
-                    .unwrap();
-                // println!("{}", r);
-
-                let value: RootResult<Transactions> = serde_json::from_str(&r).unwrap();
-
-                let transactions = value.to_result().unwrap();
-                println!("Got {} transactions", transactions.len());
-
-                let mut transactions = transactions.into_transactions();
-                transactions.sort_by_key(|t| t.date);
-                let transactions = transactions
-                    .into_iter()
-                    .map(|t| t.unify())
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap();
-                let mut transactions: HashSet<UnifiedTransaction> =
-                    transactions.into_iter().flatten().collect();
-                transactions.extend(cache.transactions.into_iter());
-                // remove duplicates from transactions
-                println!("Got {} transactions", transactions.len());
-
-                let cache = Cache {
-                    last_date: transactions
-                        .iter()
-                        .map(|t| t.date)
-                        .max()
-                        .unwrap_or(Date::today()),
-                    transactions: transactions.iter().cloned().collect(),
-                };
-                let mut f = std::fs::File::create(cache_path).unwrap();
-                serde_json::to_writer(&mut f, &cache).unwrap();
-                println!("Converted {} transactions", transactions.len());
-                lock.write()
-                    .unwrap()
-                    .replace(transactions.into_iter().collect::<Vec<_>>());
-            })?;
-
-        Ok(None)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Cache {
-    last_date: Date,
-    transactions: Vec<UnifiedTransaction>,
-}
-
-impl Default for Cache {
-    fn default() -> Self {
+    pub fn new(account_name: String) -> Self {
         Self {
-            last_date: Date::new(2020, 01, 01).unwrap(),
-            transactions: Default::default(),
+            account_name,
+            credentials: None,
+            session_id: Arc::new(RwLock::new(Option::None)),
+            client: reqwest::blocking::Client::new(),
         }
+    }
+
+    pub fn with_credentials(mut self, credentials: Credentials) -> Self {
+        self.credentials = Some(credentials);
+        self
+    }
+
+    pub fn with_session_id(self, session_id: String) -> Self {
+        *self.session_id.write().unwrap() = Some(session_id);
+        self
+    }
+
+    fn check_session_id(&self) {
+        if self.session_id.read().unwrap().is_none() {
+            if let Some(creds) = self.credentials.as_ref() {
+                #[allow(deprecated)]
+                let response = creds.call(self).unwrap();
+                if let Some(session_id) = response.response() {
+                    *self.session_id.write().unwrap() = Some(session_id.session_id.clone());
+                } else {
+                    let msgs = response.get_messages().unwrap();
+                    for msg in msgs.errors() {
+                        eprintln!("{:?}", msg);
+                    }
+
+                    for msg in msgs.warnings() {
+                        eprintln!("{:?}", msg);
+                    }
+
+                    for msg in msgs.infos() {
+                        eprintln!("{:?}", msg);
+                    }
+
+                    panic!("No session id returned");
+                }
+            } else {
+                panic!("No session id set");
+            }
+        }
+    }
+
+    pub fn execute<A: ApiCall>(&self, call: A) -> Result<ApiResponse<A::Response>, RequestError> {
+        self.check_session_id();
+        #[allow(deprecated)]
+        call.call(self)
     }
 }

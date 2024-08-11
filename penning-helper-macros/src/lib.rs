@@ -38,10 +38,7 @@ impl AttrDescribe {
                     None
                 }
             }
-            a => panic!(
-                "Needs to be in the format of #[describe(skip)] or #[describe(password)], was {:?}",
-                a
-            ),
+            a => panic!("Needs to be in the format of #[describe(skip)] or #[describe(password)]",),
         }
     }
 }
