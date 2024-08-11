@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::Write,
     ops::{Add, Deref, DerefMut},
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -12,11 +11,12 @@ use crate::{
     file_receiver::{FileReceiverResult, FileReceiverSource},
     FooBar, Relations, ERROR_STUFF,
 };
+use chrono::{Days, Local, NaiveDate};
 use eframe::egui::{self, Ui};
 use egui::RichText;
 use egui_extras::{Column, TableBuilder};
 
-use penning_helper_conscribo::UnifiedTransaction;
+use penning_helper_conscribo::transactions::UnifiedTransaction;
 use penning_helper_mail::MailServer;
 use penning_helper_types::{Date, Euro};
 use rand::Rng;
@@ -25,8 +25,8 @@ use rand::Rng;
 struct RelationTransaction {
     t: Vec<UnifiedTransaction>,
     name: String,
-    code: u32,
-    membership_date: Date,
+    code: String,
+    membership_date: NaiveDate,
     iban: String,
     bic: String,
     email: String,
@@ -161,14 +161,9 @@ impl SepaGen {
             self.idx += 1;
             self.idx %= 200;
 
-            let cache_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
-            let cache_dir = cache_dir.join("penning-helper");
-            std::fs::create_dir_all(&cache_dir).unwrap();
-            let cache = cache_dir.join("cache.json");
-
             let r = foobar
                 .conscribo
-                .run(|c| c.get_transactions(&cache))
+                .run(|c| c.get_transactions())
                 .transpose()
                 .map(Option::flatten);
             ui.ctx().request_repaint();
@@ -192,28 +187,30 @@ impl SepaGen {
             for _ in 0..min(self.unifieds.len(), 1000) {
                 let t = self.unifieds.remove(0);
 
-                let Some(rel) = members.find_member(t.code) else {
+                let Some(rel) = members.find_member(&t.code) else {
                     println!("No relation found for {}", t.code);
                     continue;
                 };
-                if rel.no_invoice {
+                if rel.geen_invoice == 1 {
                     continue;
                 }
-                let name = rel.naam.as_str();
+                let name = rel.display_name.as_str();
                 let iban = rel
-                    .rekening
+                    .account
                     .as_ref()
                     .map(|r| r.iban.as_str())
                     .unwrap_or_default();
                 let bic = rel
-                    .rekening
+                    .account
                     .as_ref()
                     .map(|r| r.bic.as_str())
                     .unwrap_or_default();
-                let email = rel.email_address.as_str();
-                let membership_date = rel.membership_started.unwrap_or_else(|| Date::today());
-                let code = rel.code;
-                let membership = rel.source == "lid";
+                let email = rel.email.as_str();
+                let membership_date = rel
+                    .lidmaatschap_gestart
+                    .unwrap_or_else(|| Local::now().date_naive());
+                let code = &rel.code;
+                // let membership = rel.source == "lid";
 
                 if rel.alumni_contributie > Euro::from(0) {
                     println!("Alumni contributie for {}", name);
@@ -221,12 +218,15 @@ impl SepaGen {
 
                 let alumni_contributie = if let Some((start, eind, amount)) =
                     rel.alumni_lidmaatschap_gestart.and_then(|s| {
-                        let e = rel
-                            .alumni_lidmaatschap_beeindigd
-                            .unwrap_or_else(|| Date::today().add_days(1024));
+                        let e = rel.alumni_lidmaatschap_be_indigd.unwrap_or_else(|| {
+                            Local::now()
+                                .date_naive()
+                                .checked_add_days(Days::new(1024))
+                                .unwrap()
+                        });
                         Some((s, e, rel.alumni_contributie))
                     }) {
-                    if start <= Date::today() && eind >= Date::today() {
+                    if start <= Local::now().date_naive() && eind >= Local::now().date_naive() {
                         amount
                     } else {
                         Euro::from(0)
@@ -248,9 +248,9 @@ impl SepaGen {
                         iban: iban.to_string(),
                         bic: bic.to_string(),
                         email: email.to_string(),
-                        code,
+                        code: code.to_string(),
                         membership_date,
-                        membership,
+                        membership: true,
                         alumni_contributie,
                     });
                 }
@@ -318,8 +318,8 @@ impl SepaGen {
                                             t.name.clone(),
                                             t.bic.clone(),
                                             t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
+                                            t.code.clone(),
+                                            t.membership_date.into(),
                                             "Alumni Contributie".to_string(),
                                         )
                                     } else if self.show == Show::Contributie {
@@ -328,8 +328,8 @@ impl SepaGen {
                                             t.name.clone(),
                                             t.bic.clone(),
                                             t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
+                                            t.code.clone(),
+                                            t.membership_date.into(),
                                             "Contributie".to_string(),
                                         )
                                     } else if total >= 100.into() {
@@ -339,8 +339,8 @@ impl SepaGen {
                                             t.name.clone(),
                                             t.bic.clone(),
                                             t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
+                                            t.code.clone(),
+                                            t.membership_date.into(),
                                             "Partial invoice of open AEGEE-Delft balance"
                                                 .to_string(),
                                         )
@@ -350,8 +350,8 @@ impl SepaGen {
                                             t.name.clone(),
                                             t.bic.clone(),
                                             t.iban.clone(),
-                                            t.code,
-                                            t.membership_date,
+                                            t.code.clone(),
+                                            t.membership_date.into(),
                                             "Invoice of open AEGEE-Delft balance".to_string(),
                                         )
                                     };

@@ -1,9 +1,10 @@
+use chrono::Local;
 use egui::TextEdit;
 
 use egui_extras::{Column, TableBuilder};
-use penning_helper_conscribo::AddChangeTransaction;
+use penning_helper_conscribo::{add_transaction::AddTransaction, multirequest::MultiRequest};
 use penning_helper_pdf::{generate_turflist_pdf, SimpleTurfRow};
-use penning_helper_types::{Date, Euro};
+use penning_helper_types::Euro;
 
 use crate::{rekening_selector::Selector, ERROR_STUFF};
 
@@ -13,7 +14,7 @@ struct Row {
     price: Option<Euro>,
     total_price_text: String,
     total_price: Option<Euro>,
-    member_name_selector: Selector<u32>,
+    member_name_selector: Selector<String>,
     rekening_selector: Selector<String>,
     count: usize,
     count_text: String,
@@ -52,7 +53,7 @@ impl<'r> From<&'r Row> for SimpleTurfRow<'r> {
 }
 
 impl Row {
-    fn all_optionals(&self) -> Option<(&str, u32, Euro, Euro)> {
+    fn all_optionals(&self) -> Option<(&str, &str, Euro, Euro)> {
         self.rekening_selector
             .get()
             .as_ref()
@@ -63,7 +64,7 @@ impl Row {
                         .and_then(|p| self.total_price.map(|t| (r, *m, p, t)))
                 })
             })
-            .map(|(r, m, p, t)| (r, *m, p * self.count as f64, t * self.count as f64))
+            .map(|(r, m, p, t)| (r, m.as_str(), p * self.count as f64, t * self.count as f64))
     }
 }
 
@@ -133,23 +134,34 @@ impl MerchSales {
                                 };
                                 rek[..len].join("(")
                             };
-                            let t = AddChangeTransaction::new(Date::today(), desc).add_merch(
-                                member_num,
-                                rekening_num.to_string(),
-                                rek.clone(),
-                                total_price,
-                                price,
-                                self.reference.clone(),
-                            );
+                            let t = AddTransaction::new()
+                                .with_date(Local::now().date_naive())
+                                .with_description(desc)
+                                .with_reference(self.reference.clone())
+                                .with_relation_nr(member_num.to_string())
+                                .add_merch(
+                                    rekening_num.to_string(),
+                                    rek.clone(),
+                                    total_price,
+                                    price,
+                                );
                             transactions.push(t);
                         } else {
                             println!("Missing data for row: {:?}", row);
                         }
                     }
-                    if let Some(res) = foobar.conscribo.run(|c| c.do_multi_request(transactions)) {
+                    if let Some(res) = foobar.conscribo.run(|c| {
+                        c.execute(
+                            MultiRequest::new()
+                                .push_all(transactions.into_iter().enumerate().collect()),
+                        )
+                    }) {
                         match res {
                             Ok(v) => {
-                                let s = format!("Added {} transactions", v.len());
+                                let s = format!(
+                                    "Added {} transactions",
+                                    v.responses_owned_unsafe().len()
+                                );
                                 if let Some(se) = ERROR_STUFF.get() {
                                     se.send(s).unwrap();
                                 }
@@ -245,8 +257,8 @@ impl MerchSales {
                         r.col(|ui| {
                             row.member_name_selector.ui_convert(
                                 ui,
-                                members.members.iter().map(|m| m.naam.as_str()),
-                                |m| members.find_member_by_name(m).map(|m| m.code),
+                                members.members.iter().map(|m| m.display_name.as_str()),
+                                |m| members.find_member_by_name(m).map(|m| m.code.clone()),
                             );
                         });
 

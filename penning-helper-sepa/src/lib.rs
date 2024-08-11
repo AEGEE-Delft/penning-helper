@@ -46,7 +46,7 @@ impl SEPAConfig {
         name: String,
         bic: String,
         iban: String,
-        code: u32,
+        code: String,
         membership_date: Date,
         description: String,
     ) -> Debtor {

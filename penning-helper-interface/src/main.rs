@@ -19,7 +19,14 @@ use file_receiver::{FileReceievers, FileReceiverResult, FileReceiverSource};
 use member_info::MemberInfo;
 use merch_sales::MerchSales;
 use penning_helper_config::{Config, ConscriboConfig};
-use penning_helper_conscribo::{ConscriboClient, ListAccounts, Member, NonMember, RekeningMap};
+use penning_helper_conscribo::{
+    accounts::{AccountRequest, AccountResponse},
+    entities::{filters::Filter, Entities, Entity},
+    field_definitions::FieldDefs,
+    multirequest::{MultiRequest, MultiRequestElementResponse},
+    session::Credentials,
+    ConscriboClient,
+};
 
 use popup::{ErrorThing, Popup};
 
@@ -31,10 +38,10 @@ mod file_receiver;
 mod member_info;
 mod merch_sales;
 mod popup;
+mod rekening_selector;
 mod sepa_stuff;
 mod settings;
 mod turflist;
-mod rekening_selector;
 
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
@@ -61,28 +68,28 @@ struct PenningHelperApp {
     r: Option<Receiver<String>>,
     members: Relations,
     sepa_stuff: penning_helper_sepa::SEPAConfig,
-    rekeningen: RekeningMap,
+    rekeningen: AccountResponse,
 }
 
 #[derive(Debug, Clone, Default)]
 struct Relations {
-    remapper: HashMap<u32, u32>,
-    members: Vec<Member>,
+    remapper: HashMap<String, String>,
+    members: Vec<Entity>,
 }
 
 impl Relations {
-    pub fn new(member_lists: &[Vec<Member>]) -> Self {
+    pub fn new(member_lists: &[Vec<Entity>]) -> Self {
         let mut remapper = HashMap::new();
-        let mut members: Vec<Member> = vec![];
+        let mut members: Vec<Entity> = vec![];
         for l in member_lists {
             for m in l {
                 if let Some(r) = members
                     .iter()
-                    .find(|&mem| mem.naam == m.naam && mem.email_address == m.email_address)
+                    .find(|&mem| mem.naam == m.naam && mem.email == m.email)
                 {
-                    remapper.insert(m.code, r.code);
+                    remapper.insert(m.code.clone(), r.code.clone());
                 } else {
-                    remapper.insert(m.code, m.code);
+                    remapper.insert(m.code.clone(), m.code.clone());
                     members.push(m.clone());
                 }
             }
@@ -91,20 +98,20 @@ impl Relations {
         Self { remapper, members }
     }
 
-    pub fn find_member(&self, code: u32) -> Option<&Member> {
-        let actual_code = *self.remapper.get(&code)?;
+    pub fn find_member(&self, code: &str) -> Option<&Entity> {
+        let actual_code = self.remapper.get(code)?.as_str();
         self.members.iter().find(|m| m.code == actual_code)
     }
 
-    pub fn find_member_by_name(&self, name: &str) -> Option<&Member> {
-        self.find_member(self.members.iter().find(|m| m.naam == name)?.code)
+    pub fn find_member_by_name(&self, name: &str) -> Option<&Entity> {
+        self.find_member(&self.members.iter().find(|m| m.display_name == name)?.code)
     }
 
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Member> {
+    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
         self.members.iter()
     }
 
@@ -114,7 +121,7 @@ impl Relations {
 }
 
 impl Index<usize> for Relations {
-    type Output = Member;
+    type Output = Entity;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.members[index]
@@ -128,7 +135,7 @@ struct FooBar<'t> {
     cfg: &'t Config,
     members: &'t Relations,
     sepa: &'t penning_helper_sepa::SEPAConfig,
-    accounts: &'t RekeningMap
+    accounts: &'t AccountResponse,
 }
 
 impl<'t> FooBar<'t> {
@@ -140,7 +147,7 @@ impl<'t> FooBar<'t> {
             cfg: &app.settings_window.config,
             members: &app.members,
             sepa: &app.sepa_stuff,
-            accounts: &app.rekeningen
+            accounts: &app.rekeningen,
         }
     }
 }
@@ -178,23 +185,31 @@ impl ConscriboConnector {
             return false;
         }
         self.client = {
-            match ConscriboClient::new(&self.username, &self.password, &cfg.url) {
-                Ok(o) => Some(o),
-                Err(e) => {
-                    println!("Error logging in: {}", e);
-                    if let Some(s) = ERROR_STUFF.get() {
-                        s.send(format!("Error logging in: {}", e)).unwrap();
-                    }
-                    None
-                }
-            }
+            // match
+            // {
+            //     Ok(o) => Some(o),
+            //     Err(e) => {
+            //         println!("Error logging in: {}", e);
+            //         if let Some(s) = ERROR_STUFF.get() {
+            //             s.send(format!("Error logging in: {}", e)).unwrap();
+            //         }
+            //         None
+            //     }
+            // }
+
+            Some(
+                ConscriboClient::new(cfg.url.clone())
+                    .with_credentials(Credentials::new(cfg.username.clone(), cfg.password.clone())),
+            )
         };
         if let Some(c) = &self.client {
             println!("Connected to Conscribo");
-            let _fields = c.get_field_definitions("lid");
-            // if let Ok(fields) = fields {
-            //     println!("Fields: {:?}", fields);
-            // }
+            let fields = c.execute(FieldDefs::new("lid".to_string()));
+            if let Ok(fields) = fields {
+                println!("Fields: {:?}", fields);
+            } else {
+                return false;
+            }
             return true;
         }
         self.n += 1;
@@ -249,33 +264,49 @@ impl eframe::App for PenningHelperApp {
                 penning_helper_sepa::SEPAConfig::from_config(self.settings_window.config.sepa());
             if self.members.is_empty() {
                 let relations = self.conscribo_client.run(|c| {
-                    let fields = c.get_field_definitions("lid").unwrap();
-                    println!("Fields: {:?}", fields);
-                    for f in fields {
-                        println!("{} = {} ({})", f.label, f.field_name, f.shared_field_name.unwrap_or_default())
-                    }
+                    let res = c.execute(
+                        MultiRequest::new()
+                            .push("lid", Entities::new().filter(Filter::entity_type("lid")))
+                            .push(
+                                "onbekend",
+                                Entities::new().filter(Filter::entity_type("onbekend")),
+                            ),
+                    );
 
-                    let members = c.get_relations::<Member>();
-                    let members = match members {
-                        Ok(m) => m,
-                        Err(e) => panic!("Error getting members: {}", e),
+                    let r = if let Ok(res) = res {
+                        let resses = res.responses_owned_unsafe();
+                        let lid = resses.get("lid").unwrap();
+                        let onbekend = resses.get("onbekend").unwrap();
+                        let mut relations = vec![];
+                        if let MultiRequestElementResponse::EntityRequest(leden) =
+                            lid.content_unsafe()
+                        {
+                            relations.push(leden.entities.values().cloned().collect());
+                        }
+                        if let MultiRequestElementResponse::EntityRequest(onbekenden) =
+                            onbekend.content_unsafe()
+                        {
+                            relations.push(onbekenden.entities.values().cloned().collect());
+                        }
+                        relations
+                    } else {
+                        vec![]
                     };
-                    let others = c.get_relations::<NonMember>().unwrap();
-                    vec![members, others.into_iter().map(|o| o.into()).collect()]
+                    r
                 });
                 if let Some(relations) = relations {
                     self.members = Relations::new(&relations);
                 }
             }
 
-            if self.rekeningen.is_empty() {
+            if self.rekeningen.accounts().is_empty() {
                 if let Some(res) = self.conscribo_client.run(|c| {
-                    let res = c.do_request(ListAccounts::today());
+                    let res = c.execute(AccountRequest::today());
                     res
                 }) {
                     match res {
                         Ok(res) => {
-                            self.rekeningen = res.to_rekening_maps();
+                            self.rekeningen = res.response_unsafe_owned();
                         }
                         Err(e) => {
                             eprintln!("Error getting accounts: {}", e);

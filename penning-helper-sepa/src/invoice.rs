@@ -126,7 +126,7 @@ pub struct Debtor {
     name: String,
     bic: String,
     iban: String,
-    code: u32,
+    code: String,
     membership_date: Date,
     description: String,
 }
@@ -138,7 +138,7 @@ impl Debtor {
         name: String,
         bic: String,
         iban: String,
-        code: u32,
+        code: String,
         membership_date: Date,
         description: String,
     ) -> Self {

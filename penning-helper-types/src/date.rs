@@ -11,6 +11,12 @@ pub struct Date {
     date: NaiveDate,
 }
 
+impl From<NaiveDate> for Date {
+    fn from(value: NaiveDate) -> Self {
+        Self { date: value }
+    }
+}
+
 impl Default for Date {
     fn default() -> Self {
         Self::today()
