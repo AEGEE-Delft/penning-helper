@@ -45,6 +45,6 @@ impl Parse for Input {
     }
 }
 
-pub fn endpoint(input: TokenStream, data: TokenStream) -> TokenStream {
+pub fn endpoint(input: TokenStream, _data: TokenStream) -> TokenStream {
     input
 }

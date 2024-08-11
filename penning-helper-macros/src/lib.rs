@@ -3,6 +3,7 @@ use syn::{parse::Parse, Ident};
 
 #[proc_macro_attribute]
 pub fn set_command(input: TokenStream, struct_data: TokenStream) -> TokenStream {
+    #[allow(deprecated)]
     penning_helper_macros_impl::command(input.into(), struct_data.into()).into()
 }
 
@@ -38,7 +39,7 @@ impl AttrDescribe {
                     None
                 }
             }
-            a => panic!("Needs to be in the format of #[describe(skip)] or #[describe(password)]",),
+            _ => panic!("Needs to be in the format of #[describe(skip)] or #[describe(password)]",),
         }
     }
 }

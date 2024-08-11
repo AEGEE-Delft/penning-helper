@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ApiCall;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Credentials {
     user_name: String,

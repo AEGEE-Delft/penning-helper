@@ -1,8 +1,10 @@
 use std::sync::{Arc, RwLock};
 
+use entities::Entity;
 use response::ApiResponse;
 use serde::{de::DeserializeOwned, Serialize};
 use session::Credentials;
+use transactions::{TransactionConvertError, Transactions, UnifiedTransaction};
 
 pub mod response;
 
@@ -21,6 +23,8 @@ pub mod accounts;
 pub mod transactions;
 
 pub mod add_invoice;
+
+pub mod add_transaction;
 
 const VERSION: &'static str = "1.20240610";
 
@@ -54,7 +58,7 @@ pub trait ApiCall: Serialize {
         let response = request.send()?;
         // let response = response.json::<ApiResponse<Self::Response>>()?;
         let response_text = response.text()?;
-        // println!("{}", response_text);
+        println!("{}", response_text);
         // let now = SystemTime::now()
         //     .duration_since(SystemTime::UNIX_EPOCH)
         //     .unwrap()
@@ -78,11 +82,13 @@ pub enum RequestError {
     SerdeError(#[from] serde_json::Error),
 }
 
+#[derive(Clone)]
 pub struct ConscriboClient {
     account_name: String,
     credentials: Option<Credentials>,
     session_id: Arc<RwLock<Option<String>>>,
     client: reqwest::blocking::Client,
+    t_get: Arc<RwLock<Option<TransactionGet>>>,
 }
 
 impl ConscriboClient {
@@ -92,6 +98,7 @@ impl ConscriboClient {
             credentials: None,
             session_id: Arc::new(RwLock::new(Option::None)),
             client: reqwest::blocking::Client::new(),
+            t_get: Default::default(),
         }
     }
 
@@ -139,4 +146,94 @@ impl ConscriboClient {
         #[allow(deprecated)]
         call.call(self)
     }
+
+    pub fn get_relations(&self) -> Vec<Entity> {
+        let leden = self
+            .execute(
+                entities::Entities::new().filter(entities::filters::Filter::entity_type("lid")),
+            )
+            .unwrap();
+        let onbekend = self
+            .execute(
+                entities::Entities::new()
+                    .filter(entities::filters::Filter::entity_type("onbekend")),
+            )
+            .unwrap();
+        let mut entities = vec![];
+        if let Some(leden) = leden.response_owned() {
+            entities.extend(leden.entities.into_values());
+        }
+        if let Some(onbekend) = onbekend.response_owned() {
+            entities.extend(onbekend.entities.into_values());
+        }
+
+        entities
+    }
+
+    pub fn get_transactions(
+        &self,
+    ) -> Result<Option<Vec<UnifiedTransaction>>, TransactionConvertError> {
+        let r = { self.t_get.write().unwrap().take() };
+        if let Some(mut t_get) = r {
+            let r = self.execute(
+                Transactions::new(100, t_get.offset + 100)
+                    .relations(t_get.relations.iter().map(String::as_str).collect())
+                    .accounts(vec!["1001", "1002"]),
+            );
+            let r = r.unwrap();
+            if let Some(res) = r.response_owned() {
+                let t = res.transactions;
+                let t = t
+                    .into_values()
+                    .map(|t| t.unify())
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                let t: Vec<UnifiedTransaction> = t.into_iter().flatten().collect();
+                println!("Got {} transactions", t.len());
+                println!("Total transactions: {}", t_get.total);
+                t_get.unifieds.extend(t);
+                t_get.offset += 100;
+                if t_get.unifieds.len() >= res.nr_transactions as usize {
+                    return Ok(Some(t_get.unifieds));
+                }
+                self.t_get.write().unwrap().replace(t_get);
+            }
+        } else {
+            let all_relations: Vec<String> =
+                self.get_relations().into_iter().map(|e| e.code).collect();
+            let r = self.execute(
+                Transactions::new(100, 0)
+                    .relations(all_relations.iter().map(String::as_str).collect())
+                    .accounts(vec!["1001", "1002"]),
+            );
+            let r = r.unwrap();
+            if let Some(res) = r.response_owned() {
+                let t = res.transactions;
+                let t = t
+                    .into_values()
+                    .map(|t| t.unify())
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                let t: Vec<UnifiedTransaction> = t.into_iter().flatten().collect();
+                if t.len() >= res.nr_transactions as usize {
+                    return Ok(Some(t));
+                }
+                self.t_get.write().unwrap().replace(TransactionGet {
+                    total: res.nr_transactions,
+                    offset: 0,
+                    relations: all_relations,
+                    unifieds: t,
+                });
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+struct TransactionGet {
+    total: i64,
+    offset: i64,
+    relations: Vec<String>,
+    unifieds: Vec<UnifiedTransaction>,
 }

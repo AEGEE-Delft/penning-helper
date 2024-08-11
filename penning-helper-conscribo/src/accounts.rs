@@ -45,6 +45,14 @@ impl AccountResponse {
     pub fn accounts(&self) -> &[Account] {
         &self.accounts
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Account> {
+        self.accounts.iter()
+    }
+
+    pub fn find_by_name(&self, name: &str) -> Option<&Account> {
+        self.accounts.iter().find(|account| account.account_name == name)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +66,12 @@ pub struct Account {
     pub used_for_credit: bool,
     pub used_for_debit: bool,
     pub parent: Option<String>,
+}
+
+impl AsRef<str> for Account {
+    fn as_ref(&self) -> &str {
+        &self.account_name
+    }
 }
 
 #[derive(Debug, Deserialize)]

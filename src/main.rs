@@ -80,8 +80,8 @@ fn main() {
                 println!("{:?}", message);
             }
         } else {
-            let t = TransactionsResponse::from_json(include_str!("../t.json"));
-            println!("{:?}", t.transactions["1"].description);
+            // let t = TransactionsResponse::from_json(include_str!("../t.json"));
+            // println!("{:?}", t.transactions["1"].description);
         }
     } else if let Some(messages) = res.get_messages() {
         for message in messages.errors() {

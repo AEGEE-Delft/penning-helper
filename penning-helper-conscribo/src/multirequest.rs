@@ -34,6 +34,16 @@ impl MultiRequest {
         self.add(seq, content);
         self
     }
+
+    pub fn push_all<R>(mut self, elements: Vec<(impl ToString, R)>) -> Self
+    where
+        R: Into<MultiRequestElement> + ApiCall,
+    {
+        for (seq, content) in elements {
+            self.add(seq, content);
+        }
+        self
+    }
 }
 
 impl ApiCall for MultiRequest {
@@ -150,11 +160,25 @@ multi_request_elements!(
     super::entity_types::EntityTypes => EntityTypes => as_entity_types,
     super::accounts::AccountRequest => AccountRequest => as_account_request,
     super::entities::Entities => EntityRequest => as_entity_request,
+    super::add_transaction::AddTransaction => AddTransaction => as_add_transaction,
 );
 
 #[derive(Deserialize, Default)]
 pub struct MultiRequestResponse {
-    responses: HashMap<String, Element>,
+    responses: MRT,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MRT {
+    Vec(Vec<Element>),
+    HashMap(HashMap<String, Element>),
+}
+
+impl Default for MRT {
+    fn default() -> Self {
+        Self::Vec(Vec::new())
+    }
 }
 
 impl MultiRequestResponse {
@@ -211,10 +235,16 @@ impl Element {
 }
 
 impl ApiResponse<MultiRequestResponse> {
-    pub fn responses(&self) -> Option<&HashMap<String, Element>> {
-        self.response().as_ref().map(|r| &r.responses)
+    pub fn responses(&self) -> Option<HashMap<String, &Element>> {
+        self.response().as_ref().map(|r| match &r.responses {
+            MRT::Vec(v) => v.iter().map(|e| (e.seq.clone(), e)).collect(),
+            MRT::HashMap(m) => m.iter().map(|(k, v)| (k.clone(), v)).collect(),
+        })
     }
     pub fn responses_owned_unsafe(self) -> HashMap<String, Element> {
-        self.response_unsafe_owned().responses
+        match self.response_unsafe_owned().responses {
+            MRT::Vec(v) => v.into_iter().map(|e| (e.seq.clone(), e)).collect(),
+            MRT::HashMap(m) => m,
+        }
     }
 }

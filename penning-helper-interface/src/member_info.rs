@@ -42,30 +42,28 @@ impl MemberInfo {
             .body(|mut b| {
                 for member in members.iter().filter(|m| {
                     self.search.is_empty()
-                        || m.naam.to_lowercase().contains(&self.search.to_lowercase())
+                        || m.display_name.to_lowercase().contains(&self.search.to_lowercase())
                 }) {
                     b.row(20.0, |mut r| {
                         r.col(|ui| {
                             ui.label(&member.code.to_string());
                         });
                         r.col(|ui| {
-                            ui.label(&member.naam);
+                            ui.label(&member.display_name);
                         });
                         r.col(|ui| {
-                            ui.label(&member.email_address);
+                            ui.label(&member.email);
                         });
                         r.col(|ui| {
                             ui.label(
                                 &member
-                                    .rekening
+                                    .account
                                     .as_ref()
                                     .map(|a| a.iban.clone())
                                     .unwrap_or("".to_string()),
                             );
                         });
-                        r.col(|ui| {
-                            ui.label(member.source);
-                        });
+                        
                     });
                 }
             });

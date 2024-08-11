@@ -4,12 +4,14 @@ use crate::file_receiver::{FileReceiverResult, FileReceiverSource};
 use crate::popup::Popup;
 use crate::rekening_selector::Selector;
 use crate::{FooBar, Relations, ERROR_STUFF};
+use chrono::Local;
 use eframe::egui::{self, Ui};
 use egui::TextEdit;
 use egui_extras::{Column, TableBuilder};
-use penning_helper_conscribo::{AddChangeTransaction, ConscriboResult, TransactionResult};
+use penning_helper_conscribo::add_transaction::AddTransaction;
+use penning_helper_conscribo::multirequest::MultiRequest;
 use penning_helper_turflists::{matched_turflist::MatchedTurflist, turflist::TurfList};
-use penning_helper_types::{Date, Euro};
+use penning_helper_types::Euro;
 
 #[derive(Clone, Debug, Default)]
 pub struct TurflistImport {
@@ -28,7 +30,10 @@ impl TurflistImport {
         ui.horizontal(|ui| {
             ui.label("Rekening");
             self.rekening.ui_convert(ui, foobar.accounts.iter(), |c| {
-                foobar.accounts.find_by_name(c).map(|a| a.account_nr.clone())
+                foobar
+                    .accounts
+                    .find_by_name(c)
+                    .map(|a| a.account_nr.clone())
             });
             if let Some(c) = self.rekening.get() {
                 ui.label(format!("{}", c));
@@ -142,33 +147,37 @@ impl TurflistImport {
                         .iter()
                         .flat_map(|m| m.idx().map(|idx| (&members[idx], m.amount)))
                         .map(|(r, eur)| {
-                            let a =
-                                AddChangeTransaction::new(Date::today(), self.description.clone());
+                            let a = AddTransaction::new()
+                                .with_date(Local::now().date_naive())
+                                .with_description(self.description.clone())
+                                .with_reference(self.reference.clone())
+                                .with_relation_nr(r.code.clone());
                             let a = if eur > Euro::default() {
-                                a.add_debet(
-                                    self.rekening.get().unwrap().clone(),
-                                    eur,
-                                    self.reference.clone(),
-                                    r.code,
-                                )
+                                a.add_debet(self.rekening.get().unwrap().clone(), eur)
                             } else {
-                                a.add_credit(
-                                    self.rekening.get().unwrap().clone(),
-                                    eur,
-                                    self.reference.clone(),
-                                    r.code,
-                                )
+                                a.add_credit(self.rekening.get().unwrap().clone(), eur)
                             };
                             a
                         })
                         .collect::<Vec<_>>();
-                    let res: Option<ConscriboResult<Vec<TransactionResult>>> =
-                        foobar.conscribo.run(|c| c.do_multi_request(transactions));
+                    let res = foobar.conscribo.run(|c| {
+                        c.execute(
+                            MultiRequest::new().push_all(
+                                transactions
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(i, t)| (i.to_string(), t))
+                                    .collect(),
+                            ),
+                        )
+                    });
+                    // let res: Option<ConscriboResult<Vec<TransactionResult>>> =
+                    //     foobar.conscribo.run(|c| c.do_multi_request(transactions));
                     if let Some(res) = res {
                         match res {
                             Ok(o) => {
                                 let mut s = String::new();
-                                for r in o {
+                                for r in o.responses_owned_unsafe() {
                                     s.push_str(&format!("{:?}\n", r));
                                 }
                                 if let Some(se) = ERROR_STUFF.get() {
@@ -185,14 +194,13 @@ impl TurflistImport {
                 }
                 if ui.button("Save PDF").clicked() {
                     let pdf = penning_helper_pdf::generate_turflist_pdf(
-                        self
-                            .matched
+                        self.matched
                             .as_ref()
                             .unwrap()
                             .iter()
                             .map(|m| {
                                 let name = match m.idx() {
-                                    Some(idx) => members[idx].naam.as_str(),
+                                    Some(idx) => members[idx].display_name.as_str(),
                                     None => m.name.as_str(),
                                 };
                                 (name, m.row())
@@ -229,11 +237,11 @@ impl TurflistImport {
         if let Some(o) = &self.turflist {
             if self.last_len != members.len() || self.matched.is_none() {
                 println!("{} != {}", self.last_len, members.len());
-                let names = members.iter().map(|m| m.naam.clone()).collect::<Vec<_>>();
-                let emails = members
+                let names = members
                     .iter()
-                    .map(|m| m.email_address.clone())
+                    .map(|m| m.display_name.clone())
                     .collect::<Vec<_>>();
+                let emails = members.iter().map(|m| m.email.clone()).collect::<Vec<_>>();
                 let mut matches = o.get_matches(&names, &emails);
                 matches.remove_zero_cost();
                 self.matched = Some(matches);
@@ -266,11 +274,11 @@ impl TurflistImport {
                     let (name, email, amount, member) = if let Some(idx) = row.idx() {
                         let member = &members[idx];
                         (
-                            member.naam.clone(),
-                            if member.email_address.is_empty() {
+                            member.display_name.clone(),
+                            if member.email.is_empty() {
                                 row.row().email.clone().unwrap_or_else(|| String::new())
                             } else {
-                                member.email_address.clone()
+                                member.email.clone()
                             },
                             row.amount,
                             Some(member),

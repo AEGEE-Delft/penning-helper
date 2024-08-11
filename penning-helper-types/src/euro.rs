@@ -189,6 +189,12 @@ impl Mul<usize> for Euro {
     }
 }
 
+impl Into<f64> for Euro {
+    fn into(self) -> f64 {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Euro;
