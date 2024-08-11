@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use penning_helper_types::{Date, Euro};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::serde_as;
 use thiserror::Error;
 
@@ -116,9 +116,23 @@ pub struct Transaction {
     pub transaction_rows: HashMap<String, TransactionRow>,
 }
 
+fn default_account() -> String {
+    "99999".to_string()
+}
+
+fn nullable_account<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_else(default_account))
+}
+
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionRow {
+    #[serde(deserialize_with = "nullable_account", default = "default_account")]
     pub account_nr: String,
     pub amount: Euro,
     pub side: Side,
@@ -178,7 +192,6 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
         let mut rows = HashMap::new();
 
         for row in value.transaction_rows.values() {
-            println!("{:?}", row);
             if row.account_nr != "1001" && row.account_nr != "1002" {
                 continue;
             }
@@ -218,4 +231,10 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
 pub enum TransactionConvertError {
     #[error("Multiple Relations found in transaction: {0:?}")]
     MultipleRelations(Vec<u32>),
+
+    #[error("No relation found in transaction")]
+    NoRelationFound,
+
+    #[error("Other error: {0}")]
+    Other(String),
 }

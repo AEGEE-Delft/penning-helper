@@ -85,7 +85,7 @@ impl Relations {
             for m in l {
                 if let Some(r) = members
                     .iter()
-                    .find(|&mem| mem.naam == m.naam && mem.email == m.email)
+                    .find(|&mem| mem.display_name == m.display_name && mem.email.to_lowercase() == m.email.to_lowercase())
                 {
                     remapper.insert(m.code.clone(), r.code.clone());
                 } else {
@@ -94,6 +94,7 @@ impl Relations {
                 }
             }
         }
+        members.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
         Self { remapper, members }
     }

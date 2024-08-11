@@ -58,7 +58,7 @@ pub trait ApiCall: Serialize {
         let response = request.send()?;
         // let response = response.json::<ApiResponse<Self::Response>>()?;
         let response_text = response.text()?;
-        println!("{}", response_text);
+        // println!("{}", response_text);
         // let now = SystemTime::now()
         //     .duration_since(SystemTime::UNIX_EPOCH)
         //     .unwrap()
@@ -170,18 +170,29 @@ impl ConscriboClient {
         entities
     }
 
-    pub fn get_transactions(
-        &self,
-    ) -> Result<Option<Vec<UnifiedTransaction>>, TransactionConvertError> {
+    pub fn get_transactions(&self) -> Result<GetTransactionResult, TransactionConvertError> {
         let r = { self.t_get.write().unwrap().take() };
         if let Some(mut t_get) = r {
             let r = self.execute(
-                Transactions::new(100, t_get.offset + 100)
+                Transactions::new(1000, t_get.offset + 100)
                     .relations(t_get.relations.iter().map(String::as_str).collect())
                     .accounts(vec!["1001", "1002"]),
             );
             let r = r.unwrap();
-            if let Some(res) = r.response_owned() {
+            if let Some(m) = r.get_messages() {
+                for message in m.errors() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.warnings() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.infos() {
+                    eprintln!("{:?}", message);
+                }
+                return Err(TransactionConvertError::Other("oof".to_string()));
+            } else if let Some(res) = r.response_owned() {
                 let t = res.transactions;
                 let t = t
                     .into_values()
@@ -194,20 +205,41 @@ impl ConscriboClient {
                 t_get.unifieds.extend(t);
                 t_get.offset += 100;
                 if t_get.unifieds.len() >= res.nr_transactions as usize {
-                    return Ok(Some(t_get.unifieds));
+                    return Ok(GetTransactionResult::Done(t_get.unifieds));
+                } else {
+                    let res = GetTransactionResult::NotDone {
+                        total: t_get.total,
+                        count: t_get.unifieds.len(),
+                    };
+                    self.t_get.write().unwrap().replace(t_get);
+                    return Ok(res);
                 }
-                self.t_get.write().unwrap().replace(t_get);
+            } else {
+                return Err(TransactionConvertError::Other("oof".to_string()));
             }
         } else {
             let all_relations: Vec<String> =
                 self.get_relations().into_iter().map(|e| e.code).collect();
             let r = self.execute(
-                Transactions::new(100, 0)
+                Transactions::new(1000, 0)
                     .relations(all_relations.iter().map(String::as_str).collect())
                     .accounts(vec!["1001", "1002"]),
             );
             let r = r.unwrap();
-            if let Some(res) = r.response_owned() {
+            if let Some(m) = r.get_messages() {
+                for message in m.errors() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.warnings() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.infos() {
+                    eprintln!("{:?}", message);
+                }
+                return Err(TransactionConvertError::Other("oof".to_string()));
+            } else if let Some(res) = r.response_owned() {
                 let t = res.transactions;
                 let t = t
                     .into_values()
@@ -216,18 +248,24 @@ impl ConscriboClient {
                     .unwrap();
                 let t: Vec<UnifiedTransaction> = t.into_iter().flatten().collect();
                 if t.len() >= res.nr_transactions as usize {
-                    return Ok(Some(t));
+                    return Ok(GetTransactionResult::Done(t));
+                } else {
+                    let r = GetTransactionResult::NotDone {
+                        total: res.nr_transactions,
+                        count: t.len(),
+                    };
+                    self.t_get.write().unwrap().replace(TransactionGet {
+                        total: res.nr_transactions,
+                        offset: 0,
+                        relations: all_relations,
+                        unifieds: t,
+                    });
+                    return Ok(r);
                 }
-                self.t_get.write().unwrap().replace(TransactionGet {
-                    total: res.nr_transactions,
-                    offset: 0,
-                    relations: all_relations,
-                    unifieds: t,
-                });
+            } else {
+                return Err(TransactionConvertError::Other("oof".to_string()));
             }
         }
-
-        Ok(None)
     }
 }
 
@@ -236,4 +274,9 @@ struct TransactionGet {
     offset: i64,
     relations: Vec<String>,
     unifieds: Vec<UnifiedTransaction>,
+}
+
+pub enum GetTransactionResult {
+    Done(Vec<UnifiedTransaction>),
+    NotDone { total: i64, count: usize },
 }

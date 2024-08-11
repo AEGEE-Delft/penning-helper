@@ -16,7 +16,7 @@ use eframe::egui::{self, Ui};
 use egui::RichText;
 use egui_extras::{Column, TableBuilder};
 
-use penning_helper_conscribo::transactions::UnifiedTransaction;
+use penning_helper_conscribo::{transactions::UnifiedTransaction, GetTransactionResult};
 use penning_helper_mail::MailServer;
 use penning_helper_types::{Date, Euro};
 use rand::Rng;
@@ -157,21 +157,23 @@ impl SepaGen {
         }
         let done = if !self.unifieds_grabbed {
             ui.label(format!("Getting transactions{}", ".".repeat(self.idx / 50)));
-            ui.label("This will take a while the first time");
+            // ui.label("This will take a while the first time");
             self.idx += 1;
             self.idx %= 200;
 
-            let r = foobar
-                .conscribo
-                .run(|c| c.get_transactions())
-                .transpose()
-                .map(Option::flatten);
-            ui.ctx().request_repaint();
+            let r = foobar.conscribo.run(|c| c.get_transactions()).transpose();
             match r {
                 Ok(r) => {
                     if let Some(r) = r {
-                        self.unifieds_grabbed = true;
-                        self.unifieds = r;
+                        match r {
+                            GetTransactionResult::Done(r) => {
+                                self.unifieds_grabbed = true;
+                                self.unifieds = r;
+                            }
+                            GetTransactionResult::NotDone { total, count } => {
+                                ui.label(format!("Got {} out of {} transactions", count, total));
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -180,6 +182,8 @@ impl SepaGen {
                     }
                 }
             }
+            ui.ctx().request_repaint();
+
             false
         } else if !self.unifieds.is_empty() {
             ui.label("Calculating, numbers will change for a bit");
@@ -211,10 +215,6 @@ impl SepaGen {
                     .unwrap_or_else(|| Local::now().date_naive());
                 let code = &rel.code;
                 // let membership = rel.source == "lid";
-
-                if rel.alumni_contributie > Euro::from(0) {
-                    println!("Alumni contributie for {}", name);
-                }
 
                 let alumni_contributie = if let Some((start, eind, amount)) =
                     rel.alumni_lidmaatschap_gestart.and_then(|s| {
