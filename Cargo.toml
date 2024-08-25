@@ -23,6 +23,8 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 
+default-members = ["penning-helper-interface"]
+
 members = [
     "penning-helper-macros",
     "penning-helper-sepa",
