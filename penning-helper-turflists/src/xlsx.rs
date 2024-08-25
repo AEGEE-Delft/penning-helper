@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use calamine::Reader;
+use calamine::{DataType, Reader};
 use penning_helper_types::Euro;
 
 use crate::turflist::{TurfList, TurfListRow};
@@ -49,12 +49,8 @@ pub fn read_excel(p: impl AsRef<Path>, cost: Euro) -> Result<TurfList, XlsxError
         .first()
         .cloned()
         .ok_or_else(|| XlsxError::Other("Workbook does not have any sheets!".to_string()))?;
-    let Some(x) = workbook.worksheet_range(&sheet) else {
-        return Err(XlsxError::Xlsx(calamine::XlsxError::Unexpected(
-            "No Sheet1 found",
-        )));
-    };
-    let data = x?;
+    
+    let data = workbook.worksheet_range(&sheet)?;
     let mut list = vec![];
 
     // let res = vec![];

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 genpdf = { version = "0.2", features = ["images"] }
 image = "0.23"
-once_cell = "1.18"
+once_cell = "1.19"
 penning-helper-turflists = { path = "../penning-helper-turflists" }
 rand = "0.8"
 penning-helper-types = { path = "../penning-helper-types" }

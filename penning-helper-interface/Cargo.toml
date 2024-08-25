@@ -6,21 +6,21 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-eframe = { version = "0.25", features = ["wayland", "wgpu"] }
+eframe = { version = "0.28", features = ["wayland", "wgpu"] }
 penning-helper-turflists = { path = "../penning-helper-turflists" }
 penning-helper-types = { path = "../penning-helper-types" }
-rfd = "0.11"
+rfd = "0.14"
 penning-helper-conscribo = { path = "../penning-helper-conscribo" }
-egui_extras = { version = "0.25", features = ["datepicker"] }
-egui_dock = "0.10"
+egui_extras = { version = "0.28", features = ["datepicker"] }
+egui_dock = "0.13"
 penning-helper-config = { path = "../penning-helper-config" }
-egui = { version = "0.25" }
+egui = { version = "0.28" }
 dirs = "5.0"
-regex = "1.9"
+regex = "1.10"
 penning-helper-pdf = { path = "../penning-helper-pdf" }
-open = "5.0"
+open = "5.3"
 penning-helper-sepa = { path = "../penning-helper-sepa" }
 penning-helper-mail = { path = "../penning-helper-mail" }
 chrono = "0.4"
 rand = "0.8"
-egui_autocomplete = "4.0.0"
+egui_autocomplete = "7.0.0"

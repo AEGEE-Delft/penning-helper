@@ -82,7 +82,7 @@ impl FileReceiver {
         let (s, receiver) = channel();
         let mut dialog = rfd::FileDialog::new();
         for (name, exts) in extensions {
-            dialog = dialog.add_filter(name, exts);
+            dialog = dialog.add_filter(*name, exts);
         }
         thread::spawn(move || {
             let r = if save {

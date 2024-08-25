@@ -29,7 +29,7 @@ members = [
     "penning-helper-macros",
     "penning-helper-sepa",
     "penning-helper-conscribo",
-    "penning-helper-conscribo-old",
+    # "penning-helper-conscribo-old",
     "penning-helper-types",
     "penning-helper-mail",
     "penning-helper-config",

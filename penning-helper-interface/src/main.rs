@@ -53,7 +53,7 @@ fn main() {
     eframe::run_native(
         "Penning Helper",
         native_options,
-        Box::new(|cc| Box::new(PenningHelperApp::new(cc, r))),
+        Box::new(|cc| Ok(Box::new(PenningHelperApp::new(cc, r)))),
     )
     .unwrap();
 }

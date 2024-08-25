@@ -16,7 +16,7 @@ impl SettingsWindow {
             .default_size(vec2(512.0, 512.0))
             .collapsible(false)
             .resizable(false)
-            .scroll2([false, true])
+            .scroll([false, true])
             .show(ctx, |ui| self.actual_show(ui));
         if open && !self.open {
             self.open = false;
