@@ -76,9 +76,9 @@ impl SettingsWindow {
         );
         labelled_row(
             ui,
-            "URL",
-            &mut self.config.conscribo_mut().url,
-            "https://secure.conscribo.nl/aegee-delft/request.json",
+            "Account Name",
+            &mut self.config.conscribo_mut().account_name,
+            "aegee-delft",
         );
         ui.heading("Mail");
         labelled_row(
@@ -142,6 +142,20 @@ impl SettingsWindow {
             "Reply-To Email",
             &mut self.config.mail_mut().reply_to.address,
             "treasurer@aegee-delft.nl",
+        );
+
+        labelled_row(
+            ui,
+            "Board Line",
+            &mut self.config.mail_mut().board_line,
+            "XLIth Board of AEGEE-Delft 'Wervelwind'",
+        );
+
+        labelled_row(
+            ui,
+            "Name",
+            &mut self.config.mail_mut().name,
+            "Piet Pieterse",
         );
 
         ui.horizontal(|ui| {

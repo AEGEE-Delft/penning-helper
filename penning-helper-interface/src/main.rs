@@ -4,6 +4,7 @@
 use std::{
     collections::HashMap,
     ops::Index,
+    path::PathBuf,
     sync::{
         mpsc::{channel, Receiver, Sender},
         OnceLock,
@@ -83,10 +84,10 @@ impl Relations {
         let mut members: Vec<Entity> = vec![];
         for l in member_lists {
             for m in l {
-                if let Some(r) = members
-                    .iter()
-                    .find(|&mem| mem.display_name == m.display_name && mem.email.to_lowercase() == m.email.to_lowercase())
-                {
+                if let Some(r) = members.iter().find(|&mem| {
+                    mem.display_name == m.display_name
+                        && mem.email.to_lowercase() == m.email.to_lowercase()
+                }) {
                     remapper.insert(m.code.clone(), r.code.clone());
                 } else {
                     remapper.insert(m.code.clone(), m.code.clone());
@@ -199,15 +200,15 @@ impl ConscriboConnector {
             // }
 
             Some(
-                ConscriboClient::new(cfg.url.clone())
+                ConscriboClient::new(cfg.account_name.clone())
                     .with_credentials(Credentials::new(cfg.username.clone(), cfg.password.clone())),
             )
         };
         if let Some(c) = &self.client {
             println!("Connected to Conscribo");
             let fields = c.execute(FieldDefs::new("lid".to_string()));
-            if let Ok(fields) = fields {
-                println!("Fields: {:?}", fields);
+            if let Ok(_fields) = fields {
+                // println!("Fields: {:?}", fields);
             } else {
                 return false;
             }
@@ -338,17 +339,28 @@ impl eframe::App for PenningHelperApp {
                         self.members = Default::default();
                         ui.close_menu();
                     }
+                    if ui.button("Refresh accounts").on_hover_text("Accounts as in what it shows in conscribo").clicked() {
+                        self.rekeningen = Default::default();
+                        ui.close_menu();
+                    }
                     if ui.button("Load File").clicked() {
                         ui.close_menu();
                         self.file_channels
                             .new_receiver(FileReceiverSource::TurfList);
                     }
-                    if ui.button("show popup").clicked() {
+                    if ui
+                        .button("Delete Invoice cache")
+                        .on_hover_text("Use this if you have changed a transaction in the past")
+                        .clicked()
+                    {
                         ui.close_menu();
-                        self.popups.insert(
-                            "test".to_string(),
-                            Popup::new_default::<(String, u16)>("Port number time"),
-                        );
+                        let file = dirs::data_local_dir()
+                            .unwrap_or(PathBuf::from("."))
+                            .join("penning-helper")
+                            .join("clientcache.bin");
+                        if let Err(e) = std::fs::remove_file(file) {
+                            eprintln!("Error deleting cache: {}", e);
+                        }
                     }
                     if ui.button("Quit").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

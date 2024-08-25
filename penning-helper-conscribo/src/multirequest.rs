@@ -79,7 +79,7 @@ impl ApiCall for MultiRequest {
         let response = request.send()?;
         // let response = response.json::<ApiResponse<Self::Response>>()?;
         let response_text = response.text()?;
-        println!("{}", response_text);
+        // println!("{}", response_text);
         let response = serde_json::from_str::<MultiRequestResponse>(&response_text)?;
 
         Ok(ApiResponse::new(response))

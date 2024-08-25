@@ -1,5 +1,10 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{atomic::AtomicUsize, Arc, Mutex, RwLock},
+};
 
+use chrono::NaiveDate;
 use entities::Entity;
 use response::ApiResponse;
 use serde::{de::DeserializeOwned, Serialize};
@@ -89,6 +94,7 @@ pub struct ConscriboClient {
     session_id: Arc<RwLock<Option<String>>>,
     client: reqwest::blocking::Client,
     t_get: Arc<RwLock<Option<TransactionGet>>>,
+    t_get_fast: Arc<RwLock<Option<TransactionGetFast>>>,
 }
 
 impl ConscriboClient {
@@ -99,6 +105,7 @@ impl ConscriboClient {
             session_id: Arc::new(RwLock::new(Option::None)),
             client: reqwest::blocking::Client::new(),
             t_get: Default::default(),
+            t_get_fast: Default::default(),
         }
     }
 
@@ -193,15 +200,15 @@ impl ConscriboClient {
                 }
                 return Err(TransactionConvertError::Other("oof".to_string()));
             } else if let Some(res) = r.response_owned() {
-                let t = res.transactions;
+                let t = res.transactions();
                 let t = t
                     .into_values()
                     .map(|t| t.unify())
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap();
                 let t: Vec<UnifiedTransaction> = t.into_iter().flatten().collect();
-                println!("Got {} transactions", t.len());
-                println!("Total transactions: {}", t_get.total);
+                // println!("Got {} transactions", t.len());
+                // println!("Total transactions: {}", t_get.total);
                 t_get.unifieds.extend(t);
                 t_get.offset += 100;
                 if t_get.unifieds.len() >= res.nr_transactions as usize {
@@ -210,6 +217,7 @@ impl ConscriboClient {
                     let res = GetTransactionResult::NotDone {
                         total: t_get.total,
                         count: t_get.unifieds.len(),
+                        from_cache: 0,
                     };
                     self.t_get.write().unwrap().replace(t_get);
                     return Ok(res);
@@ -240,7 +248,7 @@ impl ConscriboClient {
                 }
                 return Err(TransactionConvertError::Other("oof".to_string()));
             } else if let Some(res) = r.response_owned() {
-                let t = res.transactions;
+                let t = res.transactions();
                 let t = t
                     .into_values()
                     .map(|t| t.unify())
@@ -253,6 +261,7 @@ impl ConscriboClient {
                     let r = GetTransactionResult::NotDone {
                         total: res.nr_transactions,
                         count: t.len(),
+                        from_cache: 0,
                     };
                     self.t_get.write().unwrap().replace(TransactionGet {
                         total: res.nr_transactions,
@@ -267,6 +276,174 @@ impl ConscriboClient {
             }
         }
     }
+
+    pub fn get_transactions_faster(&self) -> Result<GetTransactionResult, TransactionConvertError> {
+        let t_get_fast = self.t_get_fast.read().unwrap();
+        if let Some(tgf) = t_get_fast.as_ref() {
+            if tgf.count.load(std::sync::atomic::Ordering::SeqCst) >= tgf.total {
+                let res1 = tgf.unifieds.lock().unwrap().clone();
+                let mut cache: HashSet<_> =
+                    tgf.cache.clone().unifieds.clone().into_iter().collect();
+                cache.extend(res1.clone());
+                let res: Vec<UnifiedTransaction> = cache.into_iter().collect();
+                // find difference between res1 and res
+                let diff: Vec<_> = res1.into_iter().filter(|e| !res.contains(e)).collect();
+                println!("Found {} new transactions", diff.len());
+
+                ClientCache::new(tgf.total, res.clone()).save();
+                return Ok(GetTransactionResult::Done(res));
+            } else {
+                return Ok(GetTransactionResult::NotDone {
+                    total: tgf.total as i64,
+                    count: tgf.count.load(std::sync::atomic::Ordering::SeqCst),
+                    from_cache: tgf.cache.unifieds.len(),
+                });
+            }
+        } else {
+            drop(t_get_fast);
+            let cache = ClientCache::load().unwrap_or_else(|| ClientCache::empty());
+
+            let all_relations: Vec<String> =
+                self.get_relations().into_iter().map(|e| e.code).collect();
+            let relations = Arc::new(all_relations);
+            let r = self.execute(
+                Transactions::new(0, 0)
+                    .relations(relations.iter().map(String::as_str).collect())
+                    .accounts(vec!["1001", "1002"])
+                    .date_start(cache.date),
+            );
+
+            let r = r.unwrap();
+            if let Some(m) = r.get_messages() {
+                for message in m.errors() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.warnings() {
+                    eprintln!("{:?}", message);
+                }
+
+                for message in m.infos() {
+                    eprintln!("{:?}", message);
+                }
+                return Err(TransactionConvertError::Other("oof".to_string()));
+            } else if let Some(res) = r.response_owned() {
+                let r = GetTransactionResult::NotDone {
+                    total: res.nr_transactions,
+                    count: 0,
+                    from_cache: cache.unifieds.len(),
+                };
+                let tgf = TransactionGetFast {
+                    total: res.nr_transactions as usize,
+                    offset: Arc::new(AtomicUsize::new(0)),
+                    count: Arc::new(AtomicUsize::new(0)),
+                    relations: relations.clone(),
+                    unifieds: Arc::new(Mutex::new(vec![])),
+                    cache: Arc::new(cache),
+                };
+                self.t_get_fast.write().unwrap().replace(tgf);
+                let c = self.clone();
+                std::thread::spawn(move || {
+                    c.get_transactions_faster_worker();
+                });
+                return Ok(r);
+            } else {
+                return Err(TransactionConvertError::Other("niks?".to_string()));
+            }
+        }
+    }
+
+    fn get_transactions_faster_worker(&self) {
+        let relations = self.get_tgf_relations();
+        let cache = self.get_tgf_cache();
+        loop {
+            let offset = self.get_tgf_offset();
+            let t = self.tgf_transactions(offset as i64, &relations, cache.date);
+            {
+                let tgf = self.t_get_fast.read().unwrap();
+                if let Some(tgf) = tgf.as_ref() {
+                    tgf.count
+                        .fetch_add(t.len(), std::sync::atomic::Ordering::SeqCst);
+                    tgf.offset
+                        .fetch_add(100, std::sync::atomic::Ordering::SeqCst);
+                    tgf.unifieds.lock().unwrap().extend(t);
+                    if tgf.count.load(std::sync::atomic::Ordering::SeqCst) >= tgf.total {
+                        break;
+                    }
+                    println!("memes");
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn get_tgf_offset(&self) -> usize {
+        let tgf = self.t_get_fast.read().unwrap();
+        if let Some(tgf) = tgf.as_ref() {
+            tgf.offset.load(std::sync::atomic::Ordering::SeqCst)
+        } else {
+            0
+        }
+    }
+
+    fn get_tgf_relations(&self) -> Arc<Vec<String>> {
+        let tgf = self.t_get_fast.read().unwrap();
+        if let Some(tgf) = tgf.as_ref() {
+            tgf.relations.clone()
+        } else {
+            Arc::new(vec![])
+        }
+    }
+
+    fn get_tgf_cache(&self) -> Arc<ClientCache> {
+        let tgf = self.t_get_fast.read().unwrap();
+        if let Some(tgf) = tgf.as_ref() {
+            tgf.cache.clone()
+        } else {
+            Arc::new(ClientCache::empty())
+        }
+    }
+
+    fn tgf_transactions(
+        &self,
+        offset: i64,
+        relations: &[String],
+        start_date: NaiveDate,
+    ) -> Vec<UnifiedTransaction> {
+        let r = self.execute(
+            Transactions::new(100, offset)
+                .relations(relations.iter().map(String::as_str).collect())
+                .accounts(vec!["1001", "1002"])
+                .date_start(start_date),
+        );
+        let r = r.unwrap();
+        if let Some(m) = r.get_messages() {
+            for message in m.errors() {
+                eprintln!("{:?}", message);
+            }
+
+            for message in m.warnings() {
+                eprintln!("{:?}", message);
+            }
+
+            for message in m.infos() {
+                eprintln!("{:?}", message);
+            }
+            return vec![];
+        } else if let Some(res) = r.response_owned() {
+            let t = res.transactions();
+            let t = t
+                .into_values()
+                .map(|t| t.unify())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let t: Vec<UnifiedTransaction> = t.into_iter().flatten().collect();
+            t
+        } else {
+            vec![]
+        }
+    }
 }
 
 struct TransactionGet {
@@ -278,5 +455,66 @@ struct TransactionGet {
 
 pub enum GetTransactionResult {
     Done(Vec<UnifiedTransaction>),
-    NotDone { total: i64, count: usize },
+    NotDone {
+        total: i64,
+        count: usize,
+        from_cache: usize,
+    },
+}
+
+#[derive(Clone)]
+struct TransactionGetFast {
+    total: usize,
+    offset: Arc<AtomicUsize>,
+    count: Arc<AtomicUsize>,
+    relations: Arc<Vec<String>>,
+    unifieds: Arc<Mutex<Vec<UnifiedTransaction>>>,
+    cache: Arc<ClientCache>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct ClientCache {
+    total: usize,
+    unifieds: Vec<UnifiedTransaction>,
+    date: NaiveDate,
+}
+
+impl ClientCache {
+    fn new(total: usize, unifieds: Vec<UnifiedTransaction>) -> Self {
+        Self {
+            total,
+            unifieds,
+            date: chrono::Local::now().date_naive(),
+        }
+    }
+
+    fn empty() -> Self {
+        Self {
+            total: 0,
+            unifieds: vec![],
+            date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+        }
+    }
+
+    pub fn load() -> Option<Self> {
+        let dir = dirs::data_local_dir()
+            .unwrap_or(PathBuf::from("."))
+            .join("penning-helper")
+            .join("clientcache.bin");
+        let file = std::fs::File::open(dir).ok()?;
+        let reader = std::io::BufReader::new(file);
+        let res = bincode::deserialize_from(reader).ok()?;
+        Some(res)
+    }
+
+    pub fn save(&self) {
+        let dir = dirs::data_local_dir()
+            .unwrap_or(PathBuf::from("."))
+            .join("penning-helper");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.join("clientcache.bin");
+        let file = std::fs::File::create(dir).unwrap();
+        let writer = std::io::BufWriter::new(file);
+        bincode::serialize_into(writer, self).unwrap();
+    }
 }

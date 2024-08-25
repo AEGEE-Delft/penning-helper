@@ -41,18 +41,18 @@ impl FieldDefsResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldDef {
-    field_name: String,
-    entity_type: String,
-    label: String,
-    description: String,
+    pub field_name: String,
+    pub entity_type: String,
+    pub label: String,
+    pub description: String,
     #[serde(rename = "type")]
-    field_type: FieldType,
+    pub field_type: FieldType,
     #[serde_as(as = "DefaultOnNull")]
-    required: bool,
-    read_only: bool,
+    pub required: bool,
+    pub read_only: bool,
     #[serde(default)]
-    possible_values: Vec<String>,
-    shared_field_name: Option<String>,
+    pub possible_values: Vec<String>,
+    pub shared_field_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -206,7 +206,7 @@ impl Config {
         if self.conscribo().password.is_empty() {
             errors.push("Conscribo password is empty");
         }
-        if self.conscribo().url.is_empty() {
+        if self.conscribo().account_name.is_empty() {
             errors.push("Conscribo URL is empty");
         }
 

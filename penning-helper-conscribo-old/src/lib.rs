@@ -77,7 +77,7 @@ impl ConscriboClient {
     }
 
     pub fn new_from_cfg(cfg: &penning_helper_config::ConscriboConfig) -> ConscriboResult<Self> {
-        Self::new(&cfg.username, &cfg.password, &cfg.url)
+        Self::new(&cfg.username, &cfg.password, &cfg.account_name)
     }
 
     pub fn do_request<A: ToRequest>(&self, req: A) -> ConscriboResult<A::Response> {

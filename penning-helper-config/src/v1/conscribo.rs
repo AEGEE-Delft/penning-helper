@@ -6,7 +6,8 @@ pub struct ConscriboConfig {
     pub username: String,
     #[describe(password)]
     pub password: String,
-    pub url: String,
+    #[serde(alias="url")]
+    pub account_name: String,
     #[serde(default)]
     pub merch_winst_rekening: String,
 }

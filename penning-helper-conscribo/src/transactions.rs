@@ -97,12 +97,33 @@ pub struct Filters<'l> {
 pub struct TransactionsResponse {
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub nr_transactions: i64,
-    pub transactions: HashMap<String, Transaction>,
+    pub transactions: Pain,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Pain {
+    #[default]
+    Nothing,
+    Vec(Vec<Transaction>),
+    Map(HashMap<String, Transaction>),
 }
 
 impl TransactionsResponse {
     pub fn from_json(s: &str) -> TransactionsResponse {
         serde_json::from_str(s).unwrap()
+    }
+
+    pub fn transactions(&self) -> HashMap<String, Transaction> {
+        match &self.transactions {
+            Pain::Map(m) => m.clone(),
+            Pain::Vec(v) => v
+                .into_iter()
+                .cloned()
+                .map(|t| (t.transaction_id.to_string(), t))
+                .collect(),
+            Pain::Nothing => HashMap::new(),
+        }
     }
 }
 
@@ -127,7 +148,6 @@ where
     let opt = Option::deserialize(deserializer)?;
     Ok(opt.unwrap_or_else(default_account))
 }
-
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,7 +179,6 @@ impl Transaction {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct UnifiedTransaction {
     pub unique_id: String,
@@ -168,6 +187,7 @@ pub struct UnifiedTransaction {
     pub description: String,
     pub reference: String,
     pub cost: Euro,
+    pub id2: String,
 }
 
 impl UnifiedTransaction {
@@ -179,6 +199,7 @@ impl UnifiedTransaction {
             description,
             reference: "123321".to_string(),
             cost,
+            id2: "123321".to_string(),
         }
     }
 }
@@ -191,7 +212,7 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
 
         let mut rows = HashMap::new();
 
-        for row in value.transaction_rows.values() {
+        for (id, row) in &value.transaction_rows {
             if row.account_nr != "1001" && row.account_nr != "1002" {
                 continue;
             }
@@ -216,6 +237,7 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
                         .unwrap_or_else(|| "????".to_string()),
                     reference: row.reference.clone().unwrap_or_else(|| "????".to_string()),
                     cost: Default::default(),
+                    id2: id.clone(),
                 });
                 match row.side {
                     Side::Debet => urow.cost += row.amount,

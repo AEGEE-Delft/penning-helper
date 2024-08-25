@@ -15,6 +15,8 @@ struct EmailTemplate<'a> {
     no_details: bool,
     company_name: &'a str,
     company_iban: &'a str,
+    board_line: &'a str,
+    treasurer: &'a str,
 }
 impl<'a> EmailTemplate<'a> {
     fn new(
@@ -24,6 +26,8 @@ impl<'a> EmailTemplate<'a> {
         no_details: bool,
         company_name: &'a str,
         company_iban: &'a str,
+        board_line: &'a str,
+        treasurer: &'a str,
     ) -> Self {
         Self {
             name,
@@ -32,6 +36,8 @@ impl<'a> EmailTemplate<'a> {
             no_details,
             company_name,
             company_iban,
+            board_line,
+            treasurer,
         }
     }
 }
@@ -114,9 +120,11 @@ impl MailServer {
         amount: Euro,
         date: Date,
         no_details: bool,
+        board: &str,
+        treasurer: &str,
     ) -> Result<(), MailError> {
         let mail_content =
-            EmailTemplate::new(&name, amount, date, no_details, &self.name, &self.iban)
+            EmailTemplate::new(&name, amount, date, no_details, &self.name, &self.iban, board, treasurer)
                 .render()
                 .unwrap();
         let email = Message::builder()

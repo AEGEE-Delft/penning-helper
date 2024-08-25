@@ -45,7 +45,7 @@ impl ConscriboClient {
     pub async fn new_from_cfg(
         cfg: &penning_helper_config::ConscriboConfig,
     ) -> ConscriboResult<Self> {
-        Self::new(&cfg.username, &cfg.password, &cfg.url).await
+        Self::new(&cfg.username, &cfg.password, &cfg.account_name).await
     }
 
     pub async fn do_request<A: ToRequest, R: DeserializeOwned>(

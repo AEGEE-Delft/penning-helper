@@ -161,7 +161,10 @@ impl SepaGen {
             self.idx += 1;
             self.idx %= 200;
 
-            let r = foobar.conscribo.run(|c| c.get_transactions()).transpose();
+            let r = foobar
+                .conscribo
+                .run(|c| c.get_transactions_faster())
+                .transpose();
             match r {
                 Ok(r) => {
                     if let Some(r) = r {
@@ -170,8 +173,15 @@ impl SepaGen {
                                 self.unifieds_grabbed = true;
                                 self.unifieds = r;
                             }
-                            GetTransactionResult::NotDone { total, count } => {
-                                ui.label(format!("Got {} out of {} transactions", count, total));
+                            GetTransactionResult::NotDone {
+                                total,
+                                count,
+                                from_cache,
+                            } => {
+                                ui.label(format!(
+                                    "Got {} out of {} transactions, with {} from cache",
+                                    count, total, from_cache
+                                ));
                             }
                         }
                     }
@@ -485,7 +495,7 @@ impl SepaGen {
                             let pdf = Self::get_pdf(self.last_invoice_date, &r);
 
                             let email_address = if matches!(self.send_mode, SendMode::Test) {
-                                "test@asraphiel.dev"
+                                foobar.cfg.mail().reply_to.address.as_str()
                             } else {
                                 r.email.as_str()
                             };
@@ -500,6 +510,8 @@ impl SepaGen {
                                 total,
                                 today,
                                 r.iban.is_empty() || r.bic.is_empty(),
+                                &foobar.cfg.mail().board_line,
+                                &foobar.cfg.mail().name,
                             ) {
                                 if let Some(s) = ERROR_STUFF.get() {
                                     s.send(format!("Error sending mail: {}", e)).unwrap();
@@ -509,6 +521,9 @@ impl SepaGen {
                         ui.ctx().request_repaint_after(Duration::from_secs(1));
                         self.last_send = TimeThing::now();
                     } else {
+                        if matches!(self.send_mode, SendMode::Test) {
+                            self.last_send.0 -= Duration::from_secs(5 * 60);
+                        }
                         ui.label(format!(
                             "Waiting, {} emails remaining, {} time remaning",
                             self.to_send.len(),

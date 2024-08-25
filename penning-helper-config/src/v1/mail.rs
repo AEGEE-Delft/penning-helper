@@ -8,7 +8,17 @@ pub struct MailConfig {
     pub credentials: Credentials,
     pub from: MailAddress,
     pub reply_to: MailAddress,
+    #[serde(default = "board_default")]
+    pub board_line: String,
+    #[serde(default)]
+    pub name: String,
 }
+
+fn board_default() -> String {
+    "XLIth Board of AEGEE-Delft 'Wervelwind'".to_string()
+}
+
+
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, Describe)]
 pub struct Credentials {
