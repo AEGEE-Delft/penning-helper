@@ -3386,7 +3386,7 @@ checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 
 [[package]]
 name = "penning-helper"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "penning-helper-config",
  "penning-helper-conscribo",
@@ -3400,7 +3400,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-config"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs",
  "penning-helper-macros",
@@ -3410,7 +3410,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-conscribo"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bincode",
  "bitcode",
@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-interface"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "dirs",
@@ -3450,7 +3450,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-macros"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "penning-helper-macros-impl",
  "quote",
@@ -3459,7 +3459,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-macros-impl"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3468,7 +3468,7 @@ dependencies = [
 
 [[package]]
 name = "penning-helper-mail"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "askama",
  "lettre",

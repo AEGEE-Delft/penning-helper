@@ -81,8 +81,8 @@ impl<'a> SimpleTransaction<'a> {
 pub fn create_invoice_pdf(mut transactions: Vec<SimpleTransaction>, name: &str) -> Vec<u8> {
     transactions.sort_by_key(|v| v.date);
     let total = transactions.iter().map(|t| t.cost).sum::<Euro>();
-    let font = genpdf::fonts::from_files("./fonts", "Roboto", None).unwrap();
-    let mut doc = genpdf::Document::new(font);
+
+    let mut doc = genpdf::Document::new(FONT_FAMILY.clone());
     doc.set_title("AEGEE-Delft Invoice");
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_header(|h| {
@@ -111,7 +111,6 @@ pub fn create_invoice_pdf(mut transactions: Vec<SimpleTransaction>, name: &str) 
     });
     let image = image::DynamicImage::ImageRgba8(image);
     let image = image::DynamicImage::ImageRgb8(image.to_rgb8());
-    
 
     let image = genpdf::elements::Image::from_dynamic_image(image)
         .expect("Failed to load test image")

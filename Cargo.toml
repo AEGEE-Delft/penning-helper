@@ -17,7 +17,7 @@ penning-helper-turflists = { path = "penning-helper-turflists" }
 serde_json = "1.0"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 
 
 [workspace]
