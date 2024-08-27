@@ -522,7 +522,9 @@ impl SepaGen {
                         self.last_send = TimeThing::now();
                     } else {
                         if matches!(self.send_mode, SendMode::Test) {
-                            self.last_send.0 -= Duration::from_secs(5 * 60);
+                            if let Some(r) = self.last_send.0.checked_sub(Duration::from_secs(5 * 60)) {
+                                self.last_send.0 = r;
+                            }
                         }
                         ui.label(format!(
                             "Waiting, {} emails remaining, {} time remaning",
