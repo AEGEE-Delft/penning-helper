@@ -43,6 +43,8 @@ mod rekening_selector;
 mod sepa_stuff;
 mod settings;
 mod turflist;
+mod version_info;
+
 
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
@@ -70,6 +72,7 @@ struct PenningHelperApp {
     members: Relations,
     sepa_stuff: penning_helper_sepa::SEPAConfig,
     rekeningen: AccountResponse,
+    info: version_info::VersionInfo,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -401,6 +404,7 @@ impl eframe::App for PenningHelperApp {
                 } else {
                     ui.colored_label(Color32::LIGHT_GRAY, "No popup");
                 }
+                self.info.render(ui);
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
