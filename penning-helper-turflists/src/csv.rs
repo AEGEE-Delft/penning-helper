@@ -54,7 +54,7 @@ pub fn try_loyverse<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadErro
     let mut list = vec![];
     let mut t = 0.0;
     for result in rdr.deserialize() {
-        println!("{:?}", result);
+        // println!("{:?}", result);
         let record: CsvEntry = result?;
         if record.payment_type != "AEGEE-DELFT" {
             continue;
@@ -81,12 +81,15 @@ impl TryFrom<TurffEntry> for TurfListRow {
         let mut e = Self::new(value.name, default_email(), Euro::from(0.0), None);
         let mut acc = vec![];
         for (k, v) in value.data {
+            if k == "UID" {
+                continue;
+            }
             let price = if let Some(v) = v.as_f64() {
                 Euro::from(v)
             } else if let Some(v) = v.as_i64() {
                 Euro::from(v)
             } else if let Some(v) = v.as_str() {
-                
+                println!("{}: {}", k, v);
                 Euro::from(v.replace(',', ".").parse::<f64>()?)
             } else {
                 println!("Skipping {}", k);
@@ -108,7 +111,9 @@ pub fn try_turff<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadError> 
     let mut t = Euro::default();
     for result in rdr.deserialize() {
         let record: TurffEntry = result?;
-        let converted: TurfListRow = record.try_into()?;
+        let converted = record.try_into();
+        println!("{:?}", converted);
+        let converted: TurfListRow = converted?;
         if converted.amount != Euro::default() {
             t += converted.amount;
             list.push(converted);
@@ -120,9 +125,11 @@ pub fn try_turff<R: Read>(mut rdr: Reader<R>) -> Result<TurfList, CsvReadError> 
 
 pub fn read_csv(r: impl AsRef<Path>) -> Result<TurfList, CsvReadError> {
     let r = r.as_ref();
+    println!("Trying loyverse");
     if let Ok(l) = try_loyverse(csv::ReaderBuilder::new().from_path(r)?) {
         return Ok(l);
     } else {
+        println!("Trying turff");
         return try_turff(csv::ReaderBuilder::new().delimiter(b';').from_path(r)?);
     }
 }

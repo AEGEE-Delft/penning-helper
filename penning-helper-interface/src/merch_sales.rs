@@ -88,7 +88,7 @@ impl MerchSales {
             self.setup = true;
         }
         ui.horizontal(|ui| {
-            ui.label("Rekening");
+            ui.label("Winst Rekening").show_tooltip_text("Aka de rekening waar de winst op komt");
             self.rekening.ui_convert(ui, foobar.accounts.iter(), |r| {
                 foobar
                     .accounts
@@ -209,19 +209,19 @@ impl MerchSales {
                     ui.label("id");
                 });
                 r.col(|ui| {
-                    ui.label("Rekening");
+                    ui.label("Balansrekening").on_hover_text("aka de rekening waar de items in staan");
                 });
                 r.col(|ui| {
                     ui.label("rekening id");
                 });
                 r.col(|ui| {
-                    ui.label("Kostprijs");
+                    ui.label("Kostprijs").on_hover_text("aka de prijs waarvoor het item op de balans staat");
                 });
                 r.col(|ui| {
                     ui.label("Kostprijs");
                 });
                 r.col(|ui| {
-                    ui.label("Verkoopprijs");
+                    ui.label("Verkoopprijs").on_hover_text("aka de totale prijs die een lid betaalt");
                 });
                 r.col(|ui| {
                     ui.label("Verkoopprijs");
@@ -230,7 +230,7 @@ impl MerchSales {
                     ui.label("Winst");
                 });
                 r.col(|ui| {
-                    ui.label("Hoe veel keer");
+                    ui.label("Hoe veel keer").on_hover_text("voor als je bijvoorbeeld 5 shotglaasjes verkoopt");
                 });
                 r.col(|ui| {
                     ui.label("Delete");
