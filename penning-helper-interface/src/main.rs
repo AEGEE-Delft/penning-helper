@@ -45,10 +45,14 @@ mod settings;
 mod turflist;
 mod version_info;
 
-
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
 fn main() {
+    if std::env::args().any(|a| a == "--version") {
+        println!("{}", version_info::VERSION);
+        return;
+    }
+    
     let (s, r) = channel();
     ERROR_STUFF.set(s).unwrap();
     let native_options = eframe::NativeOptions::default();
@@ -342,7 +346,11 @@ impl eframe::App for PenningHelperApp {
                         self.members = Default::default();
                         ui.close_menu();
                     }
-                    if ui.button("Refresh accounts").on_hover_text("Accounts as in what it shows in conscribo").clicked() {
+                    if ui
+                        .button("Refresh accounts")
+                        .on_hover_text("Accounts as in what it shows in conscribo")
+                        .clicked()
+                    {
                         self.rekeningen = Default::default();
                         ui.close_menu();
                     }

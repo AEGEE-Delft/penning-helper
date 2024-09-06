@@ -1,6 +1,6 @@
 use egui::Ui;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 const URL: &str = "https://github.com/AEGEE-Delft/penning-helper/releases/latest";
 
 pub struct VersionInfo {
