@@ -43,16 +43,10 @@ mod rekening_selector;
 mod sepa_stuff;
 mod settings;
 mod turflist;
-mod version_info;
 
 static ERROR_STUFF: OnceLock<Sender<String>> = OnceLock::new();
 
 fn main() {
-    if std::env::args().any(|a| a == "--version") {
-        println!("{}", version_info::VERSION);
-        return;
-    }
-    
     let (s, r) = channel();
     ERROR_STUFF.set(s).unwrap();
     let native_options = eframe::NativeOptions::default();
@@ -76,7 +70,6 @@ struct PenningHelperApp {
     members: Relations,
     sepa_stuff: penning_helper_sepa::SEPAConfig,
     rekeningen: AccountResponse,
-    info: version_info::VersionInfo,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -412,7 +405,6 @@ impl eframe::App for PenningHelperApp {
                 } else {
                     ui.colored_label(Color32::LIGHT_GRAY, "No popup");
                 }
-                self.info.render(ui);
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {

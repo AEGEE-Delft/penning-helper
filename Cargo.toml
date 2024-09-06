@@ -19,7 +19,7 @@ reqwest = { version = "0.12.7", features = ["json"] }
 semver = "1.0.23"
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 
 
 [workspace]
