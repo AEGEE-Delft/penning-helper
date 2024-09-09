@@ -88,7 +88,7 @@ impl MerchSales {
             self.setup = true;
         }
         ui.horizontal(|ui| {
-            ui.label("Winst Rekening").show_tooltip_text("Aka de rekening waar de winst op komt");
+            ui.label("Winst Rekening").on_hover_text("Aka de rekening waar de winst op komt");
             self.rekening.ui_convert(ui, foobar.accounts.iter(), |r| {
                 foobar
                     .accounts
