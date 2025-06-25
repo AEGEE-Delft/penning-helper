@@ -412,7 +412,7 @@ impl ConscriboClient {
         start_date: NaiveDate,
     ) -> Vec<UnifiedTransaction> {
         let r = self.execute(
-            Transactions::new(100, offset)
+            Transactions::new(1000, offset)
                 .relations(relations.iter().map(String::as_str).collect())
                 .accounts(vec!["1001", "1002"])
                 .date_start(start_date),

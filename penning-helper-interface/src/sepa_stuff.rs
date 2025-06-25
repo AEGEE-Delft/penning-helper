@@ -522,7 +522,9 @@ impl SepaGen {
                         self.last_send = TimeThing::now();
                     } else {
                         if matches!(self.send_mode, SendMode::Test) {
-                            if let Some(r) = self.last_send.0.checked_sub(Duration::from_secs(5 * 60)) {
+                            if let Some(r) =
+                                self.last_send.0.checked_sub(Duration::from_secs(5 * 60))
+                            {
                                 self.last_send.0 = r;
                             }
                         }
@@ -616,8 +618,28 @@ impl SepaGen {
         let to_show = r.all_after(last_invoice_date);
         let t = std::iter::once(&t)
             .chain(to_show)
-            .map(|t| penning_helper_pdf::SimpleTransaction::new(t.cost, &t.description, t.date))
+            .map(|t| {
+                penning_helper_pdf::SimpleTransaction::new(
+                    t.cost,
+                    Self::no_weird_generated_incasso_name(&t.description),
+                    t.date,
+                )
+            })
             .collect::<Vec<_>>();
         penning_helper_pdf::create_invoice_pdf(t, &r.name)
+    }
+
+    fn no_weird_generated_incasso_name(descr: &str) -> &str {
+        const INCASSO_STRING: &str = "Incasso Contributie";
+
+        if descr.contains("Internetbankieren")
+            && descr.contains("Incasso")
+            && descr.contains("Deel")
+            && descr.contains("Totaal")
+        {
+            INCASSO_STRING
+        } else {
+            descr
+        }
     }
 }
