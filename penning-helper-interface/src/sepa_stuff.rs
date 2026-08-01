@@ -201,6 +201,11 @@ impl SepaGen {
             for _ in 0..min(self.unifieds.len(), 1000) {
                 let t = self.unifieds.remove(0);
 
+                if t.is_from_99999 {
+                    // very ugly fix to skip the 99999 transactions, which are broken somehow...
+                    continue;
+                }
+
                 let Some(rel) = members.find_member(&t.code) else {
                     println!("No relation found for {}", t.code);
                     continue;

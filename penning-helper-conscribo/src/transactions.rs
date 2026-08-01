@@ -189,6 +189,7 @@ pub struct UnifiedTransaction {
     pub reference: String,
     pub cost: Euro,
     pub id2: String,
+    pub is_from_99999: bool,
 }
 
 impl UnifiedTransaction {
@@ -201,6 +202,7 @@ impl UnifiedTransaction {
             reference: "123321".to_string(),
             cost,
             id2: "123321".to_string(),
+            is_from_99999: false,
         }
     }
 }
@@ -212,6 +214,11 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
         let date = value.date;
 
         let mut rows = HashMap::new();
+
+        let is_from_99999 = value
+            .transaction_rows
+            .values()
+            .any(|it| it.account_nr == "99999");
 
         for (id, row) in &value.transaction_rows {
             if row.account_nr != "1001" && row.account_nr != "1002" {
@@ -239,6 +246,7 @@ impl TryFrom<Transaction> for Vec<UnifiedTransaction> {
                     reference: row.reference.clone().unwrap_or_else(|| "????".to_string()),
                     cost: Default::default(),
                     id2: id.clone(),
+                    is_from_99999,
                 });
                 match row.side {
                     Side::Debet => urow.cost += row.amount,
