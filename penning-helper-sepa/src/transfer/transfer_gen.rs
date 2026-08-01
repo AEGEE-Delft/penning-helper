@@ -8,7 +8,7 @@ pub struct DocumentString {
 }
 
 impl ToXml for DocumentString {
-    fn to_xml(&self) -> Vec<XmlEvent> {
+    fn to_xml<'l>(&'l self) -> Vec<XmlEvent<'l>> {
         let mut v = vec![
             XmlEvent::start_element("Document")
                 .default_ns("urn:iso:std:iso:20022:tech:xsd:pain.001.001.03")
@@ -49,7 +49,7 @@ struct HeaderString {
 }
 
 impl ToXml for HeaderString {
-    fn to_xml(&self) -> Vec<XmlEvent> {
+    fn to_xml<'l>(&'l self) -> Vec<XmlEvent<'l>> {
         vec![
             XmlEvent::start_element("GrpHdr").into(),
             XmlEvent::start_element("MsgId").into(),
@@ -98,7 +98,7 @@ struct PaymentInformationString {
 }
 
 impl ToXml for PaymentInformationString {
-    fn to_xml(&self) -> Vec<XmlEvent> {
+    fn to_xml<'l>(&'l self) -> Vec<XmlEvent<'l>> {
         let mut v = vec![
             XmlEvent::start_element("PmtInf").into(),
             XmlEvent::start_element("PmtInfId").into(),
@@ -186,7 +186,7 @@ struct CreditorString {
 }
 
 impl ToXml for CreditorString {
-    fn to_xml(&self) -> Vec<xml::writer::XmlEvent> {
+    fn to_xml<'l>(&'l self) -> Vec<xml::writer::XmlEvent<'l>> {
         vec![
             XmlEvent::start_element("CdtTrfTxInf").into(),
             XmlEvent::start_element("PmtId").into(),

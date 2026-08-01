@@ -80,6 +80,21 @@ impl SettingsWindow {
             &mut self.config.conscribo_mut().account_name,
             "aegee-delft",
         );
+        let t = self.config.conscribo().last_closed_year;
+        let mut s = if t == 0 {
+            "".to_string()
+        } else {
+            t.to_string()
+        };
+        ui.vertical(|ui| {
+            ui.label("Last Closed Year");
+            ui.add(TextEdit::singleline(&mut s).char_limit(4).hint_text("2022"));
+        });
+        self.config.conscribo_mut().last_closed_year = if s.is_empty() {
+            0
+        } else {
+            s.parse().unwrap_or(t)
+        };
         ui.heading("Mail");
         labelled_row(
             ui,

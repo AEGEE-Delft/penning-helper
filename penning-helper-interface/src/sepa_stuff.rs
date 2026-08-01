@@ -482,7 +482,6 @@ impl SepaGen {
                     if !self.to_send.is_empty()
                         && (self.last_send + Duration::from_secs(5 * 60)) <= Instant::now()
                     {
-                        self.last_send = TimeThing::now();
                         println!("Sending emails");
                         let today = Date::today();
                         for r in self.to_send.drain(0..(20.min(self.to_send.len()))) {

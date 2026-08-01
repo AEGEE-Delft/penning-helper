@@ -24,6 +24,7 @@ impl<'l> Transactions<'l> {
             limit,
             offset,
         }
+        .settled(false)
     }
 
     pub fn transaction_ids(mut self, transaction_ids: Vec<&'l str>) -> Self {

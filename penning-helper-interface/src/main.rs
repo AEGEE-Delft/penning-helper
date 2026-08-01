@@ -12,6 +12,7 @@ use std::{
     time::SystemTime,
 };
 
+use chrono::NaiveDate;
 use eframe::egui::{self, Ui};
 use egui::{Color32, Visuals};
 use egui_dock::{DockState, NodeIndex, Style, SurfaceIndex};
@@ -160,6 +161,7 @@ struct ConscriboConnector {
     username: String,
     password: String,
     n: u32,
+    last_closed_year: u16,
 }
 
 impl ConscriboConnector {
@@ -178,6 +180,8 @@ impl ConscriboConnector {
         if username.is_empty() || password.is_empty() {
             return false;
         }
+
+        self.last_closed_year = cfg.last_closed_year;
 
         self.username = username;
         self.password = password;
@@ -201,7 +205,10 @@ impl ConscriboConnector {
 
             Some(
                 ConscriboClient::new(cfg.account_name.clone())
-                    .with_credentials(Credentials::new(cfg.username.clone(), cfg.password.clone())),
+                    .with_credentials(Credentials::new(cfg.username.clone(), cfg.password.clone()))
+                    .with_transaction_start_date(
+                        NaiveDate::from_ymd_opt(cfg.last_closed_year as i32, 9, 1).unwrap(),
+                    ),
             )
         };
         if let Some(c) = &self.client {

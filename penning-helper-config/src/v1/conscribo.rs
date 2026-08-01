@@ -10,4 +10,10 @@ pub struct ConscriboConfig {
     pub account_name: String,
     #[serde(default)]
     pub merch_winst_rekening: String,
+    #[serde(default = "default_last_closed_year")]
+    pub last_closed_year: u16,
+}
+
+fn default_last_closed_year() -> u16 {
+    2022
 }
