@@ -101,7 +101,7 @@ impl FileReceiver {
         }
     }
 
-    pub fn get_file(&self) -> FileReceiverResult {
+    pub fn get_file<'l>(&'l self) -> FileReceiverResult<'l> {
         if self.has_received {
             if let Some(f) = &self.file {
                 FileReceiverResult::File(f)
@@ -113,7 +113,7 @@ impl FileReceiver {
         }
     }
 
-    pub fn try_recv(&mut self) -> FileReceiverResult {
+    pub fn try_recv<'l>(&'l mut self) -> FileReceiverResult<'l> {
         if self.has_received {
             return if let Some(f) = &self.file {
                 FileReceiverResult::File(f)

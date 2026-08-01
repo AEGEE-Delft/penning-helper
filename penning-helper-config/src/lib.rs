@@ -209,6 +209,9 @@ impl Config {
         if self.conscribo().account_name.is_empty() {
             errors.push("Conscribo URL is empty");
         }
+        if self.conscribo().last_closed_year == 0 {
+            errors.push("Conscribo last closed year is 0");
+        }
 
         errors
     }

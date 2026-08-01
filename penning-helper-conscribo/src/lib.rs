@@ -31,7 +31,7 @@ pub mod add_invoice;
 
 pub mod add_transaction;
 
-const VERSION: &'static str = "1.20240610";
+const VERSION: &'static str = "1.20260414";
 
 pub trait ApiCall: Serialize {
     type Response: DeserializeOwned + Default;
@@ -95,6 +95,7 @@ pub struct ConscriboClient {
     client: reqwest::blocking::Client,
     t_get: Arc<RwLock<Option<TransactionGet>>>,
     t_get_fast: Arc<RwLock<Option<TransactionGetFast>>>,
+    transaction_start_date: NaiveDate,
 }
 
 impl ConscriboClient {
@@ -106,6 +107,7 @@ impl ConscriboClient {
             client: reqwest::blocking::Client::new(),
             t_get: Default::default(),
             t_get_fast: Default::default(),
+            transaction_start_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
         }
     }
 
@@ -116,6 +118,11 @@ impl ConscriboClient {
 
     pub fn with_session_id(self, session_id: String) -> Self {
         *self.session_id.write().unwrap() = Some(session_id);
+        self
+    }
+
+    pub fn with_transaction_start_date(mut self, transaction_start_date: NaiveDate) -> Self {
+        self.transaction_start_date = transaction_start_date;
         self
     }
 
@@ -301,7 +308,7 @@ impl ConscriboClient {
             }
         } else {
             drop(t_get_fast);
-            let cache = ClientCache::load().unwrap_or_else(|| ClientCache::empty());
+            let cache = ClientCache::load().unwrap_or_else(|| ClientCache::empty(self.transaction_start_date));
 
             let all_relations: Vec<String> =
                 self.get_relations().into_iter().map(|e| e.code).collect();
@@ -370,7 +377,6 @@ impl ConscriboClient {
                     if tgf.count.load(std::sync::atomic::Ordering::SeqCst) >= tgf.total {
                         break;
                     }
-                    println!("memes");
                 } else {
                     break;
                 }
@@ -401,7 +407,7 @@ impl ConscriboClient {
         if let Some(tgf) = tgf.as_ref() {
             tgf.cache.clone()
         } else {
-            Arc::new(ClientCache::empty())
+            Arc::new(ClientCache::empty(self.transaction_start_date))
         }
     }
 
@@ -488,11 +494,11 @@ impl ClientCache {
         }
     }
 
-    fn empty() -> Self {
+    fn empty(date: NaiveDate) -> Self {
         Self {
             total: 0,
             unifieds: vec![],
-            date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            date,
         }
     }
 

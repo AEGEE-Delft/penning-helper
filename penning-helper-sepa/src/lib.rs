@@ -181,5 +181,5 @@ impl SEPAConfig {
 }
 
 trait ToXml {
-    fn to_xml(&self) -> Vec<XmlEvent>;
+    fn to_xml<'l>(&'l self) -> Vec<XmlEvent<'l>>;
 }
